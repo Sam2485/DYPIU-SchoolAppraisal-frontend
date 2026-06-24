@@ -7,9 +7,12 @@ const moduleBlocksFor = (module) =>
   ];
 
 export default function AdministrativeReportPanel({ meta, modules, data, onClose }) {
+  const filledFields = Object.values(data.fields).filter((value) => String(value || "").trim()).length;
+  const rowCount = Object.values(data.tables).reduce((count, rows) => count + rows.length, 0);
+
   return (
-    <div style={styles.panel}>
-      <div style={styles.header}>
+    <div className="generated-report" style={styles.panel}>
+      <div className="generated-report__cover" style={styles.header}>
         <div style={styles.headerContent}>
           <img src={universityLogo} alt="DYPIU Logo" style={styles.logo} />
           <div>
@@ -21,41 +24,37 @@ export default function AdministrativeReportPanel({ meta, modules, data, onClose
           </div>
         </div>
         <div className="admin-report-actions" style={styles.actions}>
+          <div style={styles.documentMeta}>
+            <span style={styles.documentBadge}>Generated Report</span>
+            <span style={styles.generatedDate}>Prepared {new Date().toLocaleDateString("en-IN")}</span>
+          </div>
+          <button type="button" className="btn btn-primary" onClick={() => window.print()}>Print</button>
           <button type="button" style={styles.secondary} onClick={onClose}>
             Close
           </button>
         </div>
       </div>
 
+      <div className="generated-report__stats" style={styles.statsGrid}>
+        <ReportStat value={modules.length} label="Sections" />
+        <ReportStat value={Object.keys(data.tables).length} label="Tables" />
+        <ReportStat value={rowCount} label="Data rows" />
+        <ReportStat value={filledFields} label="Fields completed" />
+      </div>
+
       <div style={styles.body}>
-        {modules.map((module) => (
-          <section key={module.id} style={styles.module}>
-            <h3 style={styles.moduleTitle}>
-              {module.number}. {module.title}
-            </h3>
+        {modules.map((module, moduleIndex) => (
+          <section className="generated-report__section" key={module.id} style={styles.module}>
+            <div className="generated-report__section-heading" style={styles.moduleHeading}>
+              <span style={styles.sectionNumber}>{String(moduleIndex + 1).padStart(2, "0")}</span>
+              <h3 style={styles.moduleTitle}>{module.number}. {module.title}</h3>
+            </div>
             {module.note && <p style={styles.moduleNote}>{module.note}</p>}
 
             {moduleBlocksFor(module).map((block, index) => {
               if (block.type === "fields") {
                 return (
-                  <div key={`fields-${index}`} style={styles.fieldGrid}>
-                    {block.fields.map((field) => {
-                      if (field.kind === "heading") {
-                        return (
-                          <h4 key={field.id} style={styles.subsectionHeading}>
-                            {field.label}
-                          </h4>
-                        );
-                      }
-
-                      return (
-                        <div key={field.id} style={styles.fieldBlock}>
-                          <div style={styles.fieldLabel}>{field.label}</div>
-                          <div style={styles.fieldValue}>{data.fields[field.id] || "-"}</div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                  <ReportFieldsTable key={`fields-${index}`} fields={block.fields} values={data.fields} />
                 );
               }
 
@@ -69,7 +68,7 @@ export default function AdministrativeReportPanel({ meta, modules, data, onClose
 
               return block.tables.map((table) => (
                 <div key={table.id} style={styles.tableBlock}>
-                  <h4 style={styles.tableTitle}>{table.title}</h4>
+                  <h4 className="generated-report__table-title" style={styles.tableTitle}>{table.title}</h4>
                   {!!table.notes?.length && (
                     <div style={styles.notes}>
                       {table.notes.map((note) => (
@@ -77,8 +76,8 @@ export default function AdministrativeReportPanel({ meta, modules, data, onClose
                       ))}
                     </div>
                   )}
-                  <div style={styles.scroller}>
-                    <table style={styles.table}>
+                  <div className="generated-report__table-wrap" style={styles.scroller}>
+                    <table className="audit-data-table" style={styles.table}>
                       <thead>
                         <tr>
                           {table.columns.map((column) => (
@@ -93,7 +92,7 @@ export default function AdministrativeReportPanel({ meta, modules, data, onClose
                           <tr key={`${table.id}-${rowIndex}`}>
                             {table.columns.map((column) => (
                               <td key={column} style={styles.td}>
-                                {row[column] || "-"}
+                                <ReportCellValue value={row[column]} />
                               </td>
                             ))}
                           </tr>
@@ -114,7 +113,8 @@ export default function AdministrativeReportPanel({ meta, modules, data, onClose
 
 function AuditorSignatureBlock() {
   return (
-    <section style={styles.signatureWrap}>
+    <section className="generated-report__signatures" style={styles.signatureWrap}>
+      <h2 style={styles.signatureTitle}>Auditor verification</h2>
       {[1, 2].map((auditor) => (
         <div key={auditor} style={styles.signatureBlock}>
           <div style={styles.signatureRow}>
@@ -135,6 +135,37 @@ function AuditorSignatureBlock() {
   );
 }
 
+function ReportStat({ value, label }) {
+  return <div className="generated-report__stat" style={styles.statCard}><strong style={styles.statValue}>{value}</strong><span style={styles.statLabel}>{label}</span></div>;
+}
+
+function ReportFieldsTable({ fields, values }) {
+  return (
+    <table className="generated-report__detail-table" style={styles.detailsTable}>
+      <tbody>
+        {fields.map((field) => field.kind === "heading" ? (
+          <tr key={field.id}>
+            <th className="generated-report__detail-heading" colSpan="2" style={styles.detailHeading}>{field.label}</th>
+          </tr>
+        ) : (
+          <tr key={field.id}>
+            <th scope="row" style={styles.detailLabel}>{field.label}</th>
+            <td style={styles.detailValue}>{values[field.id] || "-"}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function ReportCellValue({ value }) {
+  if (!value) return "-";
+  if (typeof value !== "object") return String(value);
+  const name = value.name || value.fileName || value.filename || "View attachment";
+  const url = value.url || value.publicUrl || value.downloadUrl;
+  return url ? <a className="generated-report__attachment" href={url} target="_blank" rel="noreferrer">{name}</a> : name;
+}
+
 const styles = {
   panel: {
     display: "flex",
@@ -147,7 +178,8 @@ const styles = {
     gap: 18,
     padding: 22,
     border: "1px solid #dbe3ef",
-    borderRadius: 10,
+    borderTop: "5px solid #2563eb",
+    borderRadius: 16,
     background: "#fff",
     boxShadow: "0 12px 26px rgba(15, 23, 42, 0.04)",
   },
@@ -189,7 +221,9 @@ const styles = {
   actions: {
     display: "flex",
     gap: 10,
-    alignItems: "flex-start",
+    alignItems: "center",
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
   },
   secondary: {
     border: "1px solid #cbd5e1",
@@ -200,6 +234,13 @@ const styles = {
     fontWeight: 900,
     cursor: "pointer",
   },
+  documentMeta: { display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 5, marginRight: 4 },
+  documentBadge: { padding: "6px 10px", borderRadius: 999, color: "#1d4ed8", background: "#dbeafe", fontSize: 10, fontWeight: 800, letterSpacing: ".06em", textTransform: "uppercase" },
+  generatedDate: { color: "#64748b", fontSize: 11 },
+  statsGrid: { display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 },
+  statCard: { display: "flex", alignItems: "baseline", gap: 8, padding: "12px 14px", border: "1px solid #dbe3ef", borderRadius: 10, background: "#fff" },
+  statValue: { color: "#1d4ed8", fontSize: 18 },
+  statLabel: { color: "#64748b", fontSize: 11, fontWeight: 700, textTransform: "uppercase" },
   body: {
     display: "flex",
     flexDirection: "column",
@@ -208,18 +249,20 @@ const styles = {
   module: {
     padding: 18,
     border: "1px solid #dbe3ef",
-    borderRadius: 10,
+    borderRadius: 14,
     background: "#fff",
   },
+  moduleHeading: { display: "flex", alignItems: "center", gap: 10, marginBottom: 14, paddingBottom: 12, borderBottom: "1px solid #e2e8f0" },
+  sectionNumber: { width: 34, height: 34, display: "grid", placeItems: "center", flex: "0 0 34px", borderRadius: 9, color: "#fff", background: "#1e293b", fontSize: 11, fontWeight: 800 },
   moduleTitle: {
-    margin: "0 0 14px",
-    padding: "12px 14px",
-    borderLeft: "4px solid #2563eb",
-    borderRadius: 6,
-    background: "#eff6ff",
+    margin: 0,
     color: "#0f172a",
     fontSize: 18,
   },
+  detailsTable: { width: "100%", marginBottom: 14, borderCollapse: "collapse", tableLayout: "fixed" },
+  detailHeading: { padding: "9px 12px", border: "1px solid #cbd5e1", color: "#1e3a8a", background: "#eff6ff", fontSize: 12, textAlign: "left" },
+  detailLabel: { width: "36%", padding: "9px 12px", border: "1px solid #dbe3ef", color: "#475569", background: "#f8fafc", fontSize: 11, fontWeight: 700, textAlign: "left", verticalAlign: "top" },
+  detailValue: { padding: "9px 12px", border: "1px solid #dbe3ef", color: "#0f172a", background: "#fff", fontSize: 11.5, whiteSpace: "pre-wrap", verticalAlign: "top" },
   moduleNote: {
     margin: "-6px 0 14px",
     color: "#475569",
@@ -286,7 +329,8 @@ const styles = {
   table: {
     width: "100%",
     borderCollapse: "collapse",
-    minWidth: 720,
+    minWidth: 0,
+    tableLayout: "fixed",
   },
   th: {
     padding: "8px 9px",
@@ -312,6 +356,7 @@ const styles = {
     borderRadius: 10,
     background: "#fff",
   },
+  signatureTitle: { gridColumn: "1 / -1", margin: 0, color: "#0f172a", fontSize: 16 },
   signatureBlock: {
     display: "flex",
     flexDirection: "column",

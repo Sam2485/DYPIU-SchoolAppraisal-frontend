@@ -134,11 +134,13 @@ export const administrativeAuditModules = [
           {
             id: "facultyExperience",
             title: "(d) Consolidated Experience of the teaching faculty considering outside experience",
+            fitToContainer: true,
             columns: ["S.No", "Name of the Faculty", "Designation", "Highest Qualification", "Date of Joining", "Experience in DYPIU", "Experience before joining DYPIU (Teaching)", "Total Experience"],
           },
           {
             id: "supportingStaff",
             title: "Details of Admin and Supporting Staff",
+            fitToContainer: true,
             notes: [
               "(a) Registrar",
               "(b) Dy Registrar / Asst Registrar",

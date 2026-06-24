@@ -16,6 +16,8 @@ export default function AuditTable({
   onUploadAttachment,
 }) {
   const columns = columnsWithSerial(table.columns);
+  const fitToContainer = table.fitToContainer !== false;
+  const denseTable = columns.length >= 9;
   const [uploadingCell, setUploadingCell] = useState("");
   const [uploadError, setUploadError] = useState("");
 
@@ -53,7 +55,7 @@ export default function AuditTable({
   };
 
   return (
-    <section className="audit-table-card" style={styles.wrap}>
+    <section className={`audit-table-card${denseTable ? " audit-table-card--dense" : ""}`} style={styles.wrap}>
       {table.showTitle !== false && (
         <div style={styles.header}>
           <h3 style={styles.title}>{table.title}</h3>
@@ -89,8 +91,14 @@ export default function AuditTable({
         </div>
       )}
 
-      <div style={styles.scroller}>
-        <table style={{ ...styles.table, minWidth: Math.max(760, columns.length * 180) }}>
+      <div style={{ ...styles.scroller, ...(fitToContainer ? styles.fittedScroller : {}) }}>
+        <table
+          style={{
+            ...styles.table,
+            minWidth: fitToContainer ? 0 : Math.max(760, columns.length * 180),
+            tableLayout: fitToContainer ? "fixed" : "auto",
+          }}
+        >
           <thead>
             <tr>
               {columns.map((column) => (
@@ -107,27 +115,81 @@ export default function AuditTable({
                   <td key={column} style={{ ...styles.td, ...(serialColumnFor([column]) ? styles.serialCell : {}) }}>
                     {isAttachmentColumn(column) ? (
                       <div style={styles.attachmentCell}>
-                        <label className="btn btn-outline" style={{ display: 'inline-flex', alignItems: 'center' }}>
-                          {uploadingCell === `${rowIndex}-${column}` ? "Uploading..." : "Add Attachment"}
-                          <input
-                            type="file"
-                            accept=".pdf,application/pdf"
-                            onChange={(event) => {
-                              const file = event.target.files?.[0];
-                              handleAttachmentChange(rowIndex, column, file);
-                              event.target.value = "";
-                            }}
-                            style={styles.fileInput}
-                            aria-label={`${table.title} ${column}`}
-                            disabled={uploadingCell === `${rowIndex}-${column}`}
-                          />
-                        </label>
-                        {row[column]?.url && (
-                          <a href={row[column].url} target="_blank" rel="noreferrer" style={styles.attachmentLink}>
-                            View Attachment
-                          </a>
+                        {row[column]?.url ? (
+                          <div className="audit-attached-file" style={styles.attachedFile}>
+                            <span style={styles.fileSummary}>
+                              <span style={styles.pdfIcon} aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                                  <path d="M6 2.75h8l4 4V21.25H6z" />
+                                  <path d="M14 2.75v4h4" />
+                                </svg>
+                              </span>
+                              <span style={styles.fileDetails}>
+                                <span style={styles.fileName} title={row[column].name || row[column].fileName}>
+                                  {row[column].name || row[column].fileName || "Attached document"}
+                                </span>
+                                <span style={styles.fileType}>PDF document</span>
+                              </span>
+                            </span>
+                            <span style={styles.fileActions}>
+                              <a
+                                className="audit-attachment-view"
+                                href={row[column].url}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={styles.attachmentLink}
+                                aria-label={`View ${row[column].name || "attachment"}`}
+                              >
+                                View
+                              </a>
+                              <label className="audit-attachment-replace" style={styles.replaceButton}>
+                                {uploadingCell === `${rowIndex}-${column}` ? "Uploading..." : "Replace"}
+                                <input
+                                  type="file"
+                                  accept=".pdf,application/pdf"
+                                  onChange={(event) => {
+                                    const file = event.target.files?.[0];
+                                    handleAttachmentChange(rowIndex, column, file);
+                                    event.target.value = "";
+                                  }}
+                                  style={styles.fileInput}
+                                  aria-label={`Replace ${table.title} ${column}`}
+                                  disabled={uploadingCell === `${rowIndex}-${column}`}
+                                />
+                              </label>
+                            </span>
+                          </div>
+                        ) : (
+                          <label className="audit-attachment-button" style={styles.attachmentButton}>
+                            <svg
+                              aria-hidden="true"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              style={styles.attachmentIcon}
+                            >
+                              <path d="M12 16V4" />
+                              <path d="m7 9 5-5 5 5" />
+                              <path d="M5 20h14" />
+                            </svg>
+                            <span>{uploadingCell === `${rowIndex}-${column}` ? "Uploading..." : "Attach PDF"}</span>
+                            <input
+                              type="file"
+                              accept=".pdf,application/pdf"
+                              onChange={(event) => {
+                                const file = event.target.files?.[0];
+                                handleAttachmentChange(rowIndex, column, file);
+                                event.target.value = "";
+                              }}
+                              style={styles.fileInput}
+                              aria-label={`${table.title} ${column}`}
+                              disabled={uploadingCell === `${rowIndex}-${column}`}
+                            />
+                          </label>
                         )}
-                        {row[column]?.name && <span style={styles.fileName}>{row[column].name}</span>}
                       </div>
                     ) : (
                       <input className="audit-table-input"
@@ -135,6 +197,7 @@ export default function AuditTable({
                         onChange={(event) => handleCellChange(rowIndex, column, event.target.value)}
                         style={{
                           ...styles.cellInput,
+                          ...(fitToContainer ? styles.fittedCellInput : {}),
                           ...(serialColumnFor([column]) ? styles.serialInput : {}),
                           background: serialColumnFor([column]) ? "#f8fafc" : "#fff",
                         }}
@@ -158,10 +221,10 @@ export default function AuditTable({
       </div>
 
       <div style={styles.footer}>
-        <button type="button" className="btn btn-secondary" onClick={onAddRow}>
-          Add Row
+        <button type="button" className="audit-table-add-row" onClick={() => onAddRow?.(table)}>
+          + Add Row
         </button>
-        <button type="button" className="btn btn-danger" onClick={onDeleteLastRow} disabled={rows.length === 1}>
+        <button type="button" className="audit-table-delete-row" onClick={() => onDeleteLastRow?.(table)} disabled={rows.length <= 1}>
           Delete Last Row
         </button>
       </div>
@@ -171,10 +234,10 @@ export default function AuditTable({
 
 const styles = {
   wrap: {
-    border: "1px solid #dbe3ef",
-    borderRadius: 13,
+    border: 0,
+    borderRadius: 0,
     background: "#fff",
-    overflow: "hidden",
+    overflow: "visible",
   },
   header: {
     display: "flex",
@@ -182,13 +245,13 @@ const styles = {
     alignItems: "center",
     gap: 12,
     margin: 0,
-    padding: "15px 17px",
-    borderBottom: "1px solid #e8edf4",
-    background: "#f8fafc",
+    padding: "0 0 9px",
+    borderBottom: 0,
+    background: "transparent",
   },
   title: {
     margin: 0,
-    fontSize: 14,
+    fontSize: 15,
     lineHeight: 1.35,
     color: "#0f172a",
     fontWeight: 700,
@@ -232,18 +295,22 @@ const styles = {
   scroller: {
     width: "100%",
     overflowX: "auto",
+    border: "1px solid #d7dee8",
+  },
+  fittedScroller: {
+    overflowX: "hidden",
   },
   table: {
     width: "100%",
     borderCollapse: "collapse",
   },
   th: {
-    padding: "11px 12px",
-    borderBottom: "1px solid #dbe3ef",
-    borderRight: "1px solid #e5edf7",
-    color: "#334155",
-    background: "#f8fafc",
-    fontSize: 11,
+    padding: "10px 11px",
+    borderBottom: "1px solid #334155",
+    borderRight: "1px solid #3a465b",
+    color: "#f8fafc",
+    background: "#1e293b",
+    fontSize: 11.5,
     fontWeight: 700,
     letterSpacing: ".025em",
     textAlign: "left",
@@ -255,20 +322,23 @@ const styles = {
     maxWidth: 72,
   },
   td: {
-    padding: 8,
-    borderBottom: "1px solid #edf2f7",
-    borderRight: "1px solid #edf2f7",
+    padding: 7,
+    borderBottom: "1px solid #dfe5ec",
+    borderRight: "1px solid #dfe5ec",
     verticalAlign: "top",
   },
   cellInput: {
     width: "100%",
     minWidth: 120,
     border: "1px solid #cbd5e1",
-    borderRadius: 8,
-    padding: "9px 10px",
+    borderRadius: 5,
+    padding: "8px 9px",
     color: "#0f172a",
     background: "#fff",
     outline: "none",
+  },
+  fittedCellInput: {
+    minWidth: 0,
   },
   serialInput: {
     minWidth: 44,
@@ -300,17 +370,15 @@ const styles = {
   },
   footer: {
     display: "flex",
-    justifyContent: "flex-end",
+    justifyContent: "flex-start",
     gap: 10,
-    padding: "12px 14px",
-    borderTop: "1px solid #e5edf7",
-    background: "#fbfcfe",
+    padding: "10px 0 2px",
+    borderTop: 0,
+    background: "transparent",
   },
   attachmentCell: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 6,
-    minWidth: 180,
+    width: "100%",
+    minWidth: 0,
   },
   attachmentButton: {
     position: "relative",
@@ -318,31 +386,109 @@ const styles = {
     alignItems: "center",
     justifyContent: "center",
     width: "fit-content",
-    border: "1px solid #2563eb",
-    borderRadius: 8,
-    color: "#2563eb",
-    background: "#fff",
+    maxWidth: "100%",
+    gap: 7,
+    minHeight: 36,
+    border: "1px solid #bfdbfe",
+    borderRadius: 7,
+    color: "#1d4ed8",
+    background: "#eff6ff",
     padding: "8px 12px",
-    fontSize: 14,
-    fontWeight: 800,
+    fontSize: 12,
+    fontWeight: 750,
     cursor: "pointer",
+    overflow: "hidden",
+    boxShadow: "0 1px 2px rgba(15, 23, 42, 0.04)",
+  },
+  attachmentIcon: {
+    width: 16,
+    height: 16,
+    flex: "0 0 16px",
   },
   fileInput: {
     position: "absolute",
     inset: 0,
+    width: "100%",
+    height: "100%",
+    margin: 0,
     opacity: 0,
     cursor: "pointer",
   },
+  attachedFile: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 9,
+    width: "100%",
+    minHeight: 46,
+    padding: "6px 7px",
+    border: "1px solid #dbe3ef",
+    borderRadius: 8,
+    background: "#f8fafc",
+  },
+  fileSummary: {
+    width: "100%",
+    minWidth: 0,
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+  },
+  pdfIcon: {
+    width: 30,
+    height: 30,
+    flex: "0 0 30px",
+    display: "grid",
+    placeItems: "center",
+    padding: 6,
+    borderRadius: 7,
+    color: "#dc2626",
+    background: "#fee2e2",
+  },
+  fileDetails: {
+    minWidth: 0,
+    display: "flex",
+    flex: 1,
+    flexDirection: "column",
+    gap: 2,
+  },
   attachmentLink: {
-    color: "#2563eb",
-    fontSize: 14,
-    fontWeight: 800,
+    flex: "0 0 auto",
+    color: "#1d4ed8",
+    fontSize: 11,
+    fontWeight: 750,
     textDecoration: "none",
   },
   fileName: {
+    overflow: "hidden",
+    color: "#1e293b",
+    fontSize: 11.5,
+    fontWeight: 700,
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  fileType: {
     color: "#64748b",
-    fontSize: 14,
-    wordBreak: "break-word",
+    fontSize: 9.5,
+  },
+  fileActions: {
+    width: "100%",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 6,
+    paddingTop: 5,
+    borderTop: "1px solid #e2e8f0",
+  },
+  replaceButton: {
+    position: "relative",
+    flex: "0 0 auto",
+    overflow: "hidden",
+    border: 0,
+    color: "#475569",
+    background: "transparent",
+    padding: "3px 2px",
+    fontSize: 10.5,
+    fontWeight: 700,
+    cursor: "pointer",
   },
   uploadError: {
     margin: "10px 14px 0",

@@ -32,7 +32,11 @@ export default function DirectorDashboard() {
         roleText="Director of Schools"
         items={[...academicAudit2025Schema.sections, { id: "summary", title: "Summary" }]}
         activeId={activeSectionId}
-        onChange={(sectionId) => { setReportMode(false); setActiveSectionId(sectionId); }}
+        onChange={(sectionId) => {
+          setReportMode(false);
+          setActiveSectionId(sectionId);
+          window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "smooth" }));
+        }}
         profile={profile}
         onLogout={() => setShowLogoutModal(true)}
       />

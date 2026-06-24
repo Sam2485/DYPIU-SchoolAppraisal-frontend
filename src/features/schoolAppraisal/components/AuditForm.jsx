@@ -219,10 +219,13 @@ export default function AuditForm({ schema, activeSectionId, reportMode, onRepor
 
   if (reportMode) {
     return (
-      <div style={styles.form}>
+      <div className="academic-report-view" style={styles.form}>
         <div className="academic-report-actions" style={styles.actions}>
           <button type="button" className="btn btn-secondary" onClick={() => onReportModeChange(false)}>
             Close
+          </button>
+          <button type="button" className="btn btn-primary" onClick={() => window.print()}>
+            Print Report
           </button>
         </div>
         <AuditReportPanel schema={schema} values={values} tables={tables} />
@@ -496,9 +499,9 @@ const styles = {
   sectionFooter: {
     display: "flex",
     justifyContent: "flex-end",
-    padding: "14px 16px",
-    border: "1px solid #e2e8f0",
-    borderRadius: 14,
-    background: "#fff",
+    marginTop: 16,
+    padding: 0,
+    border: 0,
+    background: "transparent",
   },
 };

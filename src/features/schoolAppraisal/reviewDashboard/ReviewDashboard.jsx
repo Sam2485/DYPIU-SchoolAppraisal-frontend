@@ -10,6 +10,7 @@ import { academicAudit2025Schema } from "../formSchemas";
 
 const REVIEW_NAV_ITEMS = [
   { id: "overview", title: "Overview" },
+  { id: "advanced-overview", title: "Advanced Overview" },
   { id: "academic", title: "Academic Audit" },
   { id: "administrative", title: "Administrative Audit" },
 ];
@@ -282,6 +283,8 @@ export default function ReviewDashboard() {
                 openSubmission(submission);
               }}
             />
+          ) : activeView === "advanced-overview" ? (
+            <AdvancedOverviewPanel metrics={metrics} submissions={allSubmissions} loading={loadingSubmissions} />
           ) : null}
 
           {error && <div style={styles.errorNotice}>{error}</div>}
@@ -330,25 +333,43 @@ function buildMetrics(submissions) {
 
 function OverviewPanel({ metrics, submissions, loading, onOpen }) {
   const pendingSubmissions = submissions.filter((submission) => submission.status !== "approved");
+  const approvalRate = metrics.total ? Math.round((metrics.approved / metrics.total) * 100) : 0;
+  const schoolProgress = buildSchoolProgress(submissions);
 
   return (
     <section style={styles.panel}>
-      <div style={styles.blueHeading}>
-        <h2 style={styles.sectionTitle}>Overview</h2>
+      <div className="review-overview-hero" style={styles.overviewHero}>
+        <div style={styles.overviewHeroCopy}>
+          <span style={styles.overviewEyebrow}>Review command center</span>
+          <h2 className="review-overview-title" style={styles.overviewTitle}>Institutional Audit Overview</h2>
+          <p style={styles.overviewDescription}>Track submissions, prioritize pending reviews, and monitor approval progress across every school.</p>
+          <div style={styles.overviewHeroPills}>
+            <span style={styles.overviewHeroPill}>{metrics.academic} Academic</span>
+            <span style={styles.overviewHeroPill}>{metrics.administrative} Administrative</span>
+            <span style={styles.overviewHeroPill}>{schoolProgress.length} Schools</span>
+          </div>
+        </div>
+        <div style={{ ...styles.approvalRing, background: `conic-gradient(#38bdf8 ${approvalRate}%, rgba(255,255,255,.16) 0)` }}>
+          <div style={styles.approvalRingInner}>
+            <strong>{approvalRate}%</strong>
+            <span>approved</span>
+          </div>
+        </div>
       </div>
 
       <div style={styles.metricGrid}>
-        <MetricCard label="Total forms" value={metrics.total} />
-        <MetricCard label="Pending review" value={metrics.submitted + metrics["under-review"]} />
-        <MetricCard label="Approved" value={metrics.approved} />
-        <MetricCard label="Sent back" value={metrics["sent-back"]} />
+        <MetricCard label="Total submissions" value={metrics.total} hint="Across both audit types" tone="blue" />
+        <MetricCard label="Pending review" value={metrics.submitted + metrics["under-review"]} hint="Requires reviewer action" tone="amber" />
+        <MetricCard label="Approved" value={metrics.approved} hint={`${approvalRate}% completion rate`} tone="green" />
+        <MetricCard label="Sent back" value={metrics["sent-back"]} hint="Awaiting school updates" tone="red" />
       </div>
 
       {loading && <div style={styles.emptyDraftNotice}>Loading submissions...</div>}
 
-      <div style={styles.splitGrid}>
-        <div style={styles.card}>
-          <h3 style={styles.cardTitle}>Audit Summary</h3>
+      <div className="review-overview-split" style={styles.splitGrid}>
+        <div className="app-surface-card" style={styles.card}>
+          <span style={styles.cardEyebrow}>Coverage</span>
+          <h3 style={styles.cardTitle}>Audit Portfolio</h3>
           <div style={styles.auditSummaryRows}>
             <SummaryRow label="Academic Audit" value={metrics.academic} />
             <SummaryRow label="Administrative Audit" value={metrics.administrative} />
@@ -357,11 +378,15 @@ function OverviewPanel({ metrics, submissions, loading, onOpen }) {
           </div>
         </div>
 
-        <div style={styles.card}>
-          <h3 style={styles.cardTitle}>Pending Review Queue</h3>
+        <div className="app-surface-card" style={styles.card}>
+          <div style={styles.queueHeader}>
+            <div><span style={styles.cardEyebrow}>Priority</span><h3 style={styles.cardTitle}>Pending Review Queue</h3></div>
+            <span style={styles.queueCount}>{pendingSubmissions.length}</span>
+          </div>
           <div style={styles.queueList}>
+            {!loading && !pendingSubmissions.length && <div style={styles.emptyDraftNotice}>All available submissions are reviewed.</div>}
             {pendingSubmissions.slice(0, 6).map((submission) => (
-              <button key={submission.id} type="button" style={styles.queueItem} onClick={() => onOpen(submission)}>
+              <button className="review-queue-item" key={submission.id} type="button" style={styles.queueItem} onClick={() => onOpen(submission)}>
                 <span>
                   <strong>{submission.school}</strong>
                   <small>{auditLabels[submission.auditType]}</small>
@@ -372,7 +397,82 @@ function OverviewPanel({ metrics, submissions, loading, onOpen }) {
           </div>
         </div>
       </div>
+
     </section>
+  );
+}
+
+function buildSchoolProgress(submissions) {
+  return Object.values(submissions.reduce((schools, submission) => {
+    const school = submission.school || "Unknown school";
+    const current = schools[school] || { school, total: 0, approved: 0, pending: 0 };
+    current.total += 1;
+    if (submission.status === "approved") current.approved += 1;
+    else current.pending += 1;
+    schools[school] = current;
+    return schools;
+  }, {})).sort((a, b) => b.pending - a.pending || a.school.localeCompare(b.school));
+}
+
+function AdvancedOverviewPanel({ metrics, submissions, loading }) {
+  const schoolProgress = buildSchoolProgress(submissions);
+  const approvalRate = metrics.total ? Math.round((metrics.approved / metrics.total) * 100) : 0;
+
+  return (
+    <section style={styles.panel}>
+      <div style={styles.pageTitleRow}>
+        <div style={styles.blueHeading}>
+          <span style={styles.cardEyebrow}>Detailed analytics</span>
+          <h2 style={styles.sectionTitle}>Advanced Overview</h2>
+          <p style={styles.progressIntro}>Expanded review status and school-level completion analysis.</p>
+        </div>
+        <span style={styles.schoolCount}>{schoolProgress.length} schools</span>
+      </div>
+
+      <div style={styles.metricGrid}>
+        <MetricCard label="Submitted" value={metrics.submitted} hint="Waiting to enter review" tone="blue" />
+        <MetricCard label="Under review" value={metrics["under-review"]} hint="Currently being assessed" tone="amber" />
+        <MetricCard label="Approved" value={metrics.approved} hint={`${approvalRate}% overall approval`} tone="green" />
+        <MetricCard label="Sent back" value={metrics["sent-back"]} hint="Requires resubmission" tone="red" />
+      </div>
+
+      <SchoolProgressPanel schools={schoolProgress} loading={loading} />
+    </section>
+  );
+}
+
+function SchoolProgressPanel({ schools, loading }) {
+  return (
+    <div className="app-surface-card" style={styles.card}>
+      <div style={styles.progressHeader}>
+        <div>
+          <span style={styles.cardEyebrow}>School analytics</span>
+          <h3 style={styles.cardTitle}>School-wise Review Progress</h3>
+          <p style={styles.progressIntro}>Approval progress across Academic and Administrative Audit submissions.</p>
+        </div>
+        <span style={styles.schoolCount}>{schools.length} schools</span>
+      </div>
+      <div style={styles.schoolProgressList}>
+        {!loading && !schools.length && <div style={styles.emptyDraftNotice}>No school submissions available yet.</div>}
+        {schools.map((school) => {
+          const percentage = school.total ? Math.round((school.approved / school.total) * 100) : 0;
+          return (
+            <div className="review-school-progress-row" key={school.school} style={styles.schoolProgressRow}>
+              <div style={styles.schoolProgressIdentity}>
+                <span style={styles.schoolProgressAvatar}>{initialsFor(school.school)}</span>
+                <span style={styles.schoolProgressName} title={school.school}>{school.school}</span>
+              </div>
+              <div style={styles.schoolProgressTrack} aria-label={`${school.school} ${percentage}% approved`}>
+                <span style={{ ...styles.schoolProgressBar, width: `${percentage}%` }} />
+              </div>
+              <strong style={styles.schoolProgressPercent}>{percentage}%</strong>
+              <span style={styles.schoolProgressMeta}>{school.approved} approved</span>
+              <span style={styles.schoolProgressPending}>{school.pending} pending</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -424,7 +524,7 @@ function AuditReviewPanel({ auditType, submissions, activeGroup, onGroupChange, 
 
 function SubmissionCard({ submission, onOpen }) {
   return (
-    <article style={styles.submissionCard}>
+    <article className="app-surface-card review-submission-card" style={styles.submissionCard}>
       <div style={styles.submissionTop}>
         <div style={styles.schoolAvatar}>{initialsFor(submission.school)}</div>
         <div style={styles.submissionTitleBlock}>
@@ -675,7 +775,7 @@ function ReadOnlyTable({ table, rows, values }) {
       )}
 
       <div style={styles.readOnlyScroller}>
-        <table style={styles.readOnlyTable}>
+        <table className="audit-data-table" style={styles.readOnlyTable}>
           <thead>
             <tr>
               {columns.map((column) => (
@@ -719,11 +819,22 @@ function renderValue(value) {
   return String(value || "").trim() || "-";
 }
 
-function MetricCard({ label, value }) {
+function MetricCard({ label, value, hint, tone }) {
+  const tones = {
+    blue: { color: "#1d4ed8", background: "#dbeafe" },
+    amber: { color: "#b45309", background: "#fef3c7" },
+    green: { color: "#15803d", background: "#dcfce7" },
+    red: { color: "#b91c1c", background: "#fee2e2" },
+  };
+  const activeTone = tones[tone] || tones.blue;
   return (
-    <div style={styles.metricCard}>
-      <strong>{value}</strong>
-      <span>{label}</span>
+    <div className="app-surface-card review-metric-card" style={styles.metricCard}>
+      <div style={styles.metricTopRow}>
+        <span style={{ ...styles.metricIndicator, ...activeTone }} aria-hidden="true" />
+        <span style={styles.metricLabel}>{label}</span>
+      </div>
+      <strong style={styles.metricValue}>{value}</strong>
+      <small style={styles.metricHint}>{hint}</small>
     </div>
   );
 }
@@ -881,6 +992,28 @@ const styles = {
     flexDirection: "column",
     gap: 18,
   },
+  overviewHero: {
+    position: "relative",
+    overflow: "hidden",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 28,
+    minHeight: 190,
+    padding: "28px 32px",
+    borderRadius: 18,
+    color: "#fff",
+    background: "linear-gradient(125deg, #17233b 0%, #1e3a5f 58%, #2563eb 100%)",
+    boxShadow: "0 18px 40px rgba(15, 23, 42, .14)",
+  },
+  overviewHeroCopy: { position: "relative", zIndex: 1, maxWidth: 720 },
+  overviewEyebrow: { display: "block", marginBottom: 8, color: "#7dd3fc", fontSize: 10, fontWeight: 800, letterSpacing: ".12em", textTransform: "uppercase" },
+  overviewTitle: { margin: "0 0 9px", color: "#fff", fontSize: 24, fontWeight: 750, letterSpacing: "-.025em" },
+  overviewDescription: { maxWidth: 640, margin: 0, color: "#cbd5e1", fontSize: 12.5, lineHeight: 1.6 },
+  overviewHeroPills: { display: "flex", flexWrap: "wrap", gap: 8, marginTop: 18 },
+  overviewHeroPill: { padding: "6px 9px", border: "1px solid rgba(255,255,255,.16)", borderRadius: 999, color: "#e0f2fe", background: "rgba(255,255,255,.08)", fontSize: 10, fontWeight: 700 },
+  approvalRing: { position: "relative", zIndex: 1, width: 118, height: 118, flex: "0 0 118px", display: "grid", placeItems: "center", borderRadius: "50%", boxShadow: "0 12px 30px rgba(15,23,42,.24)" },
+  approvalRingInner: { width: 88, height: 88, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", borderRadius: "50%", color: "#fff", background: "#17233b" },
   blueHeading: {
     padding: "15px 18px",
     borderLeft: "5px solid #2563eb",
@@ -916,18 +1049,23 @@ const styles = {
     gap: 14,
   },
   metricCard: {
+    position: "relative",
+    overflow: "hidden",
     border: "1px solid #e5eaf2",
-    borderRadius: 13,
+    borderRadius: 14,
     background: "#fff",
-    padding: "18px 20px",
+    padding: "17px 18px",
     display: "flex",
     flexDirection: "column",
-    gap: 5,
+    gap: 8,
     color: "#64748b",
-    fontSize: 14,
-    fontWeight: 800,
-    textTransform: "uppercase",
+    boxShadow: "0 8px 24px rgba(15, 23, 42, .035)",
   },
+  metricTopRow: { display: "flex", alignItems: "center", gap: 8 },
+  metricIndicator: { width: 24, height: 24, display: "grid", placeItems: "center", borderRadius: 7 },
+  metricLabel: { color: "#475569", fontSize: 10.5, fontWeight: 750, letterSpacing: ".04em", textTransform: "uppercase" },
+  metricValue: { color: "#0f172a", fontSize: 25, lineHeight: 1, letterSpacing: "-.03em" },
+  metricHint: { color: "#94a3b8", fontSize: 10.5, fontWeight: 600 },
   splitGrid: {
     display: "grid",
     gridTemplateColumns: "minmax(280px, .8fr) minmax(320px, 1.2fr)",
@@ -941,11 +1079,82 @@ const styles = {
     boxShadow: "0 10px 30px rgba(15, 23, 42, 0.04)",
   },
   cardTitle: {
-    margin: "0 0 14px",
+    margin: "2px 0 14px",
     color: "#0f172a",
     fontSize: 18,
     fontWeight: 800,
   },
+  cardEyebrow: { color: "#2563eb", fontSize: 9.5, fontWeight: 800, letterSpacing: ".1em", textTransform: "uppercase" },
+  queueHeader: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 },
+  queueCount: { minWidth: 30, height: 30, display: "grid", placeItems: "center", borderRadius: 9, color: "#92400e", background: "#fef3c7", fontSize: 11, fontWeight: 800 },
+  progressHeader: {
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 14,
+    marginBottom: 14,
+  },
+  progressIntro: {
+    margin: "-7px 0 0",
+    color: "#64748b",
+    fontSize: 12,
+  },
+  schoolProgressList: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+  },
+  schoolProgressRow: {
+    display: "grid",
+    gridTemplateColumns: "minmax(190px, 1.2fr) minmax(160px, 1fr) 52px 88px 78px",
+    alignItems: "center",
+    gap: 12,
+    padding: "10px 12px",
+    border: "1px solid #e2e8f0",
+    borderRadius: 10,
+    background: "#fbfdff",
+  },
+  schoolProgressIdentity: {
+    minWidth: 0,
+    display: "flex",
+    alignItems: "center",
+    gap: 9,
+  },
+  schoolProgressAvatar: {
+    width: 30,
+    height: 30,
+    flex: "0 0 30px",
+    display: "grid",
+    placeItems: "center",
+    borderRadius: 8,
+    color: "#fff",
+    background: "linear-gradient(135deg, #2563eb, #0ea5e9)",
+    fontSize: 9,
+    fontWeight: 800,
+  },
+  schoolProgressName: {
+    overflow: "hidden",
+    color: "#1e293b",
+    fontSize: 12,
+    fontWeight: 700,
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  schoolProgressTrack: {
+    height: 7,
+    overflow: "hidden",
+    borderRadius: 999,
+    background: "#e2e8f0",
+  },
+  schoolProgressBar: {
+    display: "block",
+    height: "100%",
+    borderRadius: 999,
+    background: "linear-gradient(90deg, #2563eb, #22c55e)",
+  },
+  schoolProgressPercent: { color: "#1e293b", fontSize: 12, textAlign: "right" },
+  schoolProgressMeta: { color: "#166534", fontSize: 10.5, fontWeight: 700, whiteSpace: "nowrap" },
+  schoolProgressPending: { color: "#92400e", fontSize: 10.5, fontWeight: 700, whiteSpace: "nowrap" },
   auditSummaryRows: {
     display: "flex",
     flexDirection: "column",
@@ -1371,8 +1580,9 @@ const styles = {
   },
   readOnlyTable: {
     width: "100%",
-    minWidth: 720,
+    minWidth: 0,
     borderCollapse: "collapse",
+    tableLayout: "fixed",
   },
   readOnlyTh: {
     padding: "9px 10px",

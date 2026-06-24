@@ -90,6 +90,12 @@ export default function AdministrativeAuditDashboard() {
   const profile = getUserProfile();
   const isSummary = activeModuleId === administrativeSummaryModule.id;
 
+  const handleModuleChange = (moduleId) => {
+    setReportMode(false);
+    setActiveModuleId(moduleId);
+    window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "smooth" }));
+  };
+
   useEffect(() => {
     let isActive = true;
 
@@ -159,7 +165,10 @@ export default function AdministrativeAuditDashboard() {
       ...current,
       tables: {
         ...current.tables,
-        [table.id]: [...current.tables[table.id], emptyRowFor(table.columns, current.tables[table.id].length)],
+        [table.id]: [
+          ...(current.tables[table.id] || []),
+          emptyRowFor(table.columns, current.tables[table.id]?.length || 0),
+        ],
       },
       lastSavedAt: new Date().toISOString(),
     }));
@@ -167,7 +176,7 @@ export default function AdministrativeAuditDashboard() {
 
   const deleteLastRow = (table) => {
     setData((current) => {
-      const nextRows = current.tables[table.id].slice(0, -1);
+      const nextRows = (current.tables[table.id] || []).slice(0, -1);
       return {
         ...current,
         tables: {
@@ -247,7 +256,7 @@ export default function AdministrativeAuditDashboard() {
         <div className="admin-audit-shell" style={styles.shell}>
           <Sidebar
             activeModuleId={activeModuleId}
-            setActiveModuleId={setActiveModuleId}
+            setActiveModuleId={handleModuleChange}
             profile={profile}
             onLogout={() => setShowLogoutModal(true)}
           />
@@ -271,10 +280,7 @@ export default function AdministrativeAuditDashboard() {
       <div className="admin-audit-shell" style={styles.shell}>
         <Sidebar
           activeModuleId={activeModuleId}
-          setActiveModuleId={(moduleId) => {
-            setReportMode(false);
-            setActiveModuleId(moduleId);
-          }}
+          setActiveModuleId={handleModuleChange}
           profile={profile}
           onLogout={() => setShowLogoutModal(true)}
         />
@@ -867,21 +873,21 @@ const styles = {
   },
   input: {
     width: "100%",
-    minHeight: 58,
+    minHeight: 42,
     border: "1px solid #d7dee9",
-    borderRadius: 10,
-    padding: "15px 16px",
+    borderRadius: 8,
+    padding: "10px 12px",
     color: "#0f172a",
     background: "#fbfcfe",
     outline: "none",
   },
   textarea: {
     width: "100%",
-    minHeight: 146,
+    minHeight: 96,
     resize: "vertical",
     border: "1px solid #d7dee9",
-    borderRadius: 10,
-    padding: "15px 16px",
+    borderRadius: 8,
+    padding: "10px 12px",
     color: "#0f172a",
     background: "#fbfcfe",
     outline: "none",
@@ -928,10 +934,9 @@ const styles = {
     display: "flex",
     justifyContent: "flex-end",
     marginTop: 16,
-    padding: "14px 16px",
-    border: "1px solid #dbe3ef",
-    borderRadius: 8,
-    background: "#f8fafc",
+    padding: 0,
+    border: 0,
+    background: "transparent",
   },
   submitStatus: {
     border: "1px solid #bbf7d0",

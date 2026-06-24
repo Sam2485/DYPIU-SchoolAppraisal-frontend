@@ -65,8 +65,8 @@ function TableList({ tableDefinitions, tableValues, values, onFieldChange, onTab
           values={values}
           onFieldChange={onFieldChange}
           onChange={(rowIndex, column, value) => onTableChange(table.id, rowIndex, column, value)}
-          onAddRow={() => onAddRow(table)}
-          onDeleteLastRow={() => onDeleteLastRow(table)}
+          onAddRow={onAddRow}
+          onDeleteLastRow={onDeleteLastRow}
           onUploadAttachment={onUploadAttachment}
         />
       ))}
@@ -113,8 +113,8 @@ const styles = {
   section: {
     display: "flex",
     flexDirection: "column",
-    gap: 16,
-    padding: 24,
+    gap: 15,
+    padding: 20,
     border: "1px solid #e2e8f0",
     borderRadius: 16,
     background: "#fff",
@@ -166,20 +166,21 @@ const styles = {
   },
   input: {
     width: "100%",
+    minHeight: 42,
     border: "1px solid #d7dee9",
-    borderRadius: 10,
-    padding: "11px 12px",
+    borderRadius: 8,
+    padding: "9px 11px",
     color: "#0f172a",
     background: "#fbfcfe",
     outline: "none",
   },
   textarea: {
     width: "100%",
-    minHeight: 88,
+    minHeight: 84,
     resize: "vertical",
     border: "1px solid #d7dee9",
-    borderRadius: 10,
-    padding: "11px 12px",
+    borderRadius: 8,
+    padding: "9px 11px",
     color: "#0f172a",
     background: "#fbfcfe",
     outline: "none",
