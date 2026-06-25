@@ -17,6 +17,7 @@ import { columnsWithSerial } from "../components/tableHelpers";
 import { administrativeAuditMeta, administrativeAuditModules } from "../administrativeAudit/administrativeAuditConfig";
 import AdministrativeReportPanel from "../administrativeAudit/AdministrativeReportPanel";
 import { academicAudit2025Schema } from "../formSchemas";
+import UserManagementPanel from "../userManagement/UserManagementPanel";
 
 const REVIEW_NAV_ITEMS = [
   { id: "overview", title: "Overview" },
@@ -24,6 +25,7 @@ const REVIEW_NAV_ITEMS = [
   { id: "academic", title: "Academic Audit" },
   { id: "administrative", title: "Administrative Audit" },
 ];
+const USER_MANAGEMENT_NAV_ITEM = { id: "user-management", title: "User Management" };
 
 const REVIEW_ROLE_CONFIG = {
   "vice-chancellor": {
@@ -149,6 +151,10 @@ export default function ReviewDashboard() {
 
   const allSubmissions = useMemo(() => [...submissions.academic, ...submissions.administrative], [submissions]);
   const metrics = useMemo(() => buildMetrics(allSubmissions), [allSubmissions]);
+  const navigationItems = useMemo(
+    () => role === "iqac" ? [...REVIEW_NAV_ITEMS, USER_MANAGEMENT_NAV_ITEM] : REVIEW_NAV_ITEMS,
+    [role],
+  );
 
   useEffect(() => {
     let isActive = true;
@@ -271,7 +277,7 @@ export default function ReviewDashboard() {
           roleTitle={roleConfig.roleTitle}
           roleText={roleConfig.roleText}
           academicYear="2025-26"
-          items={REVIEW_NAV_ITEMS}
+          items={navigationItems}
           activeId={activeView}
           onChange={(viewId) => {
             setSelectedSubmission(null);
@@ -318,6 +324,8 @@ export default function ReviewDashboard() {
             />
           ) : activeView === "advanced-overview" ? (
             <AdvancedOverviewPanel metrics={metrics} submissions={allSubmissions} loading={loadingSubmissions} />
+          ) : activeView === "user-management" && role === "iqac" ? (
+            <UserManagementPanel />
           ) : null}
 
           {error && <div className="review-error-notice" style={styles.errorNotice}>{error}</div>}
