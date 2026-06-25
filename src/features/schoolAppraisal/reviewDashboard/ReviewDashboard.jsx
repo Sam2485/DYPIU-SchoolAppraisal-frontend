@@ -5,7 +5,6 @@ import {
   SIGN_OFF_FIELD,
   fetchAllSubmissions,
   fetchSubmissionById,
-  fetchSubmissionSnapshots,
   getSubmissionSignOff,
   parseSubmissionFormData,
   reviewSubmission,
@@ -18,6 +17,7 @@ import { columnsWithSerial } from "../components/tableHelpers";
 import { administrativeAuditMeta, administrativeAuditModules } from "../administrativeAudit/administrativeAuditConfig";
 import AdministrativeReportPanel from "../administrativeAudit/AdministrativeReportPanel";
 import { academicAudit2025Schema } from "../formSchemas";
+import UserManagementPanel from "../userManagement/UserManagementPanel";
 
 const REVIEW_NAV_ITEMS = [
   { id: "overview", title: "Overview" },
@@ -25,6 +25,7 @@ const REVIEW_NAV_ITEMS = [
   { id: "academic", title: "Academic Audit" },
   { id: "administrative", title: "Administrative Audit" },
 ];
+const USER_MANAGEMENT_NAV_ITEM = { id: "user-management", title: "User Management" };
 
 const REVIEW_ROLE_CONFIG = {
   "vice-chancellor": {
@@ -115,6 +116,7 @@ const normalizeSubmission = (submission = {}) => {
     group: submission.group || submission.schoolGroup || "all",
     school: submission.school || submission.schoolName || submission.department || "School",
     submittedBy: signOff.submittedBy.name || submission.userName || "-",
+    submittedByDesignation: signOff.submittedBy.designation || (auditType === "academic" ? "Director" : ""),
     submittedOn: signOff.submittedBy.date || new Date().toISOString(),
     reviewedBy: signOff.approvedBy.name,
     reviewedByDesignation: signOff.approvedBy.designation,
@@ -124,7 +126,6 @@ const normalizeSubmission = (submission = {}) => {
     attachments: formData.attachments.length ? formData.attachments : submission.attachments || [],
     status: normalizeStatus(submission.status),
     remarks: submission.remarks || "",
-    snapshots: submission.snapshots || [],
   };
 };
 
@@ -150,6 +151,10 @@ export default function ReviewDashboard() {
 
   const allSubmissions = useMemo(() => [...submissions.academic, ...submissions.administrative], [submissions]);
   const metrics = useMemo(() => buildMetrics(allSubmissions), [allSubmissions]);
+  const navigationItems = useMemo(
+    () => role === "iqac" ? [...REVIEW_NAV_ITEMS, USER_MANAGEMENT_NAV_ITEM] : REVIEW_NAV_ITEMS,
+    [role],
+  );
 
   useEffect(() => {
     let isActive = true;
@@ -201,14 +206,10 @@ export default function ReviewDashboard() {
     setError("");
 
     try {
-      const [{ data: detailData }, { data: snapshotsData }] = await Promise.all([
-        fetchSubmissionById(submission.id),
-        fetchSubmissionSnapshots(submission.id),
-      ]);
+      const { data: detailData } = await fetchSubmissionById(submission.id);
       const detailedSubmission = normalizeSubmission({
         ...submission,
         ...submissionPayload(detailData),
-        snapshots: responseList(snapshotsData),
       });
       setSelectedSubmission(detailedSubmission);
     } catch (openError) {
@@ -276,7 +277,7 @@ export default function ReviewDashboard() {
           roleTitle={roleConfig.roleTitle}
           roleText={roleConfig.roleText}
           academicYear="2025-26"
-          items={REVIEW_NAV_ITEMS}
+          items={navigationItems}
           activeId={activeView}
           onChange={(viewId) => {
             setSelectedSubmission(null);
@@ -323,6 +324,8 @@ export default function ReviewDashboard() {
             />
           ) : activeView === "advanced-overview" ? (
             <AdvancedOverviewPanel metrics={metrics} submissions={allSubmissions} loading={loadingSubmissions} />
+          ) : activeView === "user-management" && role === "iqac" ? (
+            <UserManagementPanel />
           ) : null}
 
           {error && <div className="review-error-notice" style={styles.errorNotice}>{error}</div>}
@@ -568,8 +571,10 @@ function SubmissionCard({ submission, onOpen }) {
         <div style={styles.submissionTitleBlock}>
           <h3 style={styles.schoolName}>{submission.school}</h3>
           <p style={styles.schoolMeta}>
-            {SCHOOL_GROUPS[submission.group]} - {submission.submittedBy}
+            {submission.auditType === "academic" ? "Director" : "Submitted by"}: {submission.submittedBy}
+            {submission.submittedByDesignation ? ` · ${submission.submittedByDesignation}` : ""}
           </p>
+          <small style={styles.schoolGroup}>{SCHOOL_GROUPS[submission.group]}</small>
         </div>
         <StatusBadge status={submission.status} />
       </div>
@@ -633,7 +638,11 @@ function FullFormReview({ submission, onBack, onRemarksChange, onApprove, onSend
         <div style={styles.fullReviewTitleBlock}>
           <p style={styles.kicker}>{auditLabels[submission.auditType]}</p>
           <h2 style={styles.fullReviewTitle}>{submission.school}</h2>
-          <p style={styles.modalMeta}>{submission.submittedBy} - Submitted {formatDate(submission.submittedOn)}</p>
+          <p style={styles.modalMeta}>
+            {submission.auditType === "academic" ? "Director" : "Submitted by"}: {submission.submittedBy}
+            {submission.submittedByDesignation ? ` · ${submission.submittedByDesignation}` : ""}
+            {" · "}Submitted {formatDate(submission.submittedOn)}
+          </p>
         </div>
         <StatusBadge status={submission.status} />
       </div>
@@ -666,6 +675,7 @@ function FullFormReview({ submission, onBack, onRemarksChange, onApprove, onSend
             <label style={styles.remarksLabel}>
               Review Remarks
               <textarea
+                className="audit-control"
                 value={submission.remarks}
                 onChange={(event) => onRemarksChange(event.target.value)}
                 placeholder="Write remarks before approving or sending back"
@@ -695,17 +705,6 @@ function FullFormReview({ submission, onBack, onRemarksChange, onApprove, onSend
                 )}
               </div>
             </div>
-            {!!submission.snapshots?.length && (
-              <div style={styles.snapshotPanel}>
-                <h3 style={styles.cardTitle}>Version History</h3>
-                {submission.snapshots.map((snapshot, index) => (
-                  <div key={snapshot.id || index} style={styles.summaryRow}>
-                    <span>{snapshot.status || snapshot.action || `Snapshot ${index + 1}`}</span>
-                    <strong>{formatDate(snapshot.createdAt || snapshot.createdOn || snapshot.timestamp || new Date())}</strong>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
         )}
       </div>
@@ -955,12 +954,12 @@ function StatusBadge({ status }) {
 function LogoutModal({ onCancel, onConfirm }) {
   return (
     <div style={styles.modalBackdrop} onClick={onCancel}>
-      <div style={styles.logoutModal} onClick={(event) => event.stopPropagation()}>
+      <div style={styles.modal} onClick={(event) => event.stopPropagation()}>
         <div style={styles.modalTitle}>Confirm Logout</div>
-        <div style={styles.modalMeta}>You are about to leave the review dashboard.</div>
+        <div style={styles.modalText}>You are about to leave the School Appraisal review dashboard.</div>
         <div style={styles.modalActions}>
-          <button type="button" className="btn btn-secondary" onClick={onCancel}>Cancel</button>
-          <button type="button" className="btn btn-danger" onClick={onConfirm}>Logout</button>
+          <button type="button" onClick={onCancel} style={styles.cancelButton}>Cancel</button>
+          <button type="button" onClick={onConfirm} style={styles.confirmButton}>Logout</button>
         </div>
       </div>
     </div>
@@ -1071,8 +1070,8 @@ const styles = {
   meta: {
     margin: 0,
     color: "#64748b",
-    fontSize: 14,
-    lineHeight: 1.5,
+    fontSize: 12.5,
+    lineHeight: 1.45,
   },
   panel: {
     display: "flex",
@@ -1102,10 +1101,8 @@ const styles = {
   approvalRing: { position: "relative", zIndex: 1, width: 118, height: 118, flex: "0 0 118px", display: "grid", placeItems: "center", borderRadius: "50%", boxShadow: "0 12px 30px rgba(15,23,42,.24)" },
   approvalRingInner: { width: 88, height: 88, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", borderRadius: "50%", color: "#fff", background: "#17233b" },
   blueHeading: {
-    padding: "15px 18px",
-    borderLeft: "5px solid #2563eb",
-    borderRadius: 8,
-    background: "#eff6ff",
+    padding: "0 0 15px",
+    borderBottom: "1px solid #edf1f6",
   },
   pageTitleRow: {
     display: "flex",
@@ -1116,9 +1113,9 @@ const styles = {
   sectionTitle: {
     margin: 0,
     color: "#0f172a",
-    fontSize: 18,
-    fontWeight: 800,
-    lineHeight: 1.25,
+    fontSize: 17,
+    fontWeight: 700,
+    lineHeight: 1.3,
   },
   schoolCount: {
     flexShrink: 0,
@@ -1127,8 +1124,8 @@ const styles = {
     border: "1px solid #e2e8f0",
     borderRadius: 999,
     padding: "8px 12px",
-    fontSize: 14,
-    fontWeight: 800,
+    fontSize: 12,
+    fontWeight: 700,
   },
   metricGrid: {
     display: "grid",
@@ -1285,13 +1282,13 @@ const styles = {
     borderRadius: 999,
     background: "#fff",
     color: "#334155",
-    padding: "9px 12px",
+    padding: "8px 11px",
     display: "inline-flex",
     alignItems: "center",
     gap: 8,
     cursor: "pointer",
-    fontSize: 14,
-    fontWeight: 800,
+    fontSize: 12,
+    fontWeight: 700,
     fontFamily: "inherit",
   },
   activeTab: {
@@ -1348,21 +1345,28 @@ const styles = {
   schoolName: {
     margin: 0,
     color: "#0f172a",
-    fontSize: 18,
-    fontWeight: 800,
+    fontSize: 15,
+    fontWeight: 700,
     lineHeight: 1.35,
   },
   schoolMeta: {
     margin: "4px 0 0",
+    color: "#334155",
+    fontSize: 12,
+    fontWeight: 650,
+  },
+  schoolGroup: {
+    display: "block",
+    marginTop: 3,
     color: "#64748b",
-    fontSize: 14,
+    fontSize: 10.5,
   },
   statusBadge: {
     border: "1px solid",
     borderRadius: 999,
     padding: "6px 10px",
-    fontSize: 12,
-    fontWeight: 900,
+    fontSize: 10.5,
+    fontWeight: 700,
     whiteSpace: "nowrap",
   },
   submissionInfoGrid: {
@@ -1379,28 +1383,28 @@ const styles = {
     flexDirection: "column",
     gap: 4,
     color: "#64748b",
-    fontSize: 12,
+    fontSize: 11,
   },
   remarksLabel: {
     display: "flex",
     flexDirection: "column",
     gap: 8,
     color: "#334155",
-    fontSize: 14,
-    fontWeight: 800,
+    fontSize: 12,
+    fontWeight: 650,
   },
   remarksInput: {
     width: "100%",
-    minHeight: 82,
-    border: "1px solid #cbd5e1",
-    borderRadius: 10,
-    padding: "10px 11px",
+    minHeight: 84,
+    border: "1px solid #d7dee9",
+    borderRadius: 8,
+    padding: "9px 11px",
     color: "#0f172a",
-    background: "#fff",
+    background: "#fbfcfe",
     outline: "none",
     resize: "vertical",
-    fontSize: 14,
-    lineHeight: 1.5,
+    fontSize: 12.5,
+    lineHeight: 1.45,
   },
   cardActions: {
     display: "flex",
@@ -1421,9 +1425,9 @@ const styles = {
     gridTemplateColumns: "auto minmax(0, 1fr) auto",
     alignItems: "center",
     gap: 16,
-    padding: 18,
+    padding: 20,
     border: "1px solid #e2e8f0",
-    borderRadius: 14,
+    borderRadius: 16,
     background: "#fff",
     boxShadow: "0 12px 30px rgba(15, 23, 42, 0.08)",
   },
@@ -1433,9 +1437,9 @@ const styles = {
   fullReviewTitle: {
     margin: "0 0 5px",
     color: "#0f172a",
-    fontSize: 18,
-    fontWeight: 900,
-    lineHeight: 1.25,
+    fontSize: 17,
+    fontWeight: 700,
+    lineHeight: 1.3,
   },
   sectionNav: {
     position: "sticky",
@@ -1456,9 +1460,9 @@ const styles = {
     borderRadius: 999,
     background: "#f8fafc",
     color: "#334155",
-    padding: "9px 12px",
-    fontSize: 14,
-    fontWeight: 900,
+    padding: "8px 11px",
+    fontSize: 12,
+    fontWeight: 700,
     cursor: "pointer",
     fontFamily: "inherit",
   },
@@ -1501,8 +1505,8 @@ const styles = {
   },
   reviewHint: {
     color: "#64748b",
-    fontSize: 14,
-    fontWeight: 800,
+    fontSize: 12,
+    fontWeight: 650,
   },
   modalBackdrop: {
     position: "fixed",
@@ -1511,7 +1515,13 @@ const styles = {
     zIndex: 1000,
     display: "grid",
     placeItems: "center",
-    padding: 20,
+  },
+  modal: {
+    width: "min(380px, 92vw)",
+    background: "#fff",
+    borderRadius: 12,
+    padding: "26px 28px",
+    boxShadow: "0 20px 60px rgba(0,0,0,0.25)",
   },
   reviewModal: {
     width: "min(1040px, 96vw)",
@@ -1534,9 +1544,16 @@ const styles = {
     paddingBottom: 16,
   },
   modalTitle: {
-    margin: "0 0 5px",
-    fontSize: 18,
     color: "#0f172a",
+    fontWeight: 900,
+    fontSize: 18,
+    marginBottom: 8,
+  },
+  modalText: {
+    color: "#64748b",
+    fontSize: 14,
+    lineHeight: 1.6,
+    marginBottom: 18,
   },
   modalMeta: {
     margin: 0,
@@ -1573,39 +1590,37 @@ const styles = {
     fontWeight: 800,
     lineHeight: 1.5,
   },
-  snapshotPanel: {
-    border: "1px solid #e2e8f0",
-    borderRadius: 10,
-    background: "#f8fafc",
-    padding: 14,
-  },
   reviewSection: {
-    border: "1px solid #dbe3ef",
-    borderRadius: 12,
+    display: "flex",
+    flexDirection: "column",
+    gap: 15,
+    border: "1px solid #e2e8f0",
+    borderRadius: 16,
     background: "#fff",
-    padding: 16,
+    padding: 20,
+    boxShadow: "0 12px 35px rgba(15, 23, 42, 0.045)",
   },
   reviewSectionTitle: {
-    margin: "0 0 14px",
-    padding: "12px 14px",
-    borderLeft: "4px solid #2563eb",
-    borderRadius: 6,
-    background: "#eff6ff",
+    margin: 0,
+    padding: "0 0 15px",
+    borderBottom: "1px solid #edf1f6",
     color: "#0f172a",
-    fontSize: 18,
-    fontWeight: 900,
+    fontSize: 17,
+    fontWeight: 700,
+    letterSpacing: "-.015em",
+    lineHeight: 1.3,
   },
   reviewSectionNote: {
     margin: "-6px 0 14px",
     color: "#475569",
-    fontSize: 14,
-    fontWeight: 800,
+    fontSize: 12,
+    fontWeight: 650,
   },
   reviewText: {
     margin: "0 0 14px",
     color: "#0f172a",
-    fontSize: 14,
-    fontWeight: 800,
+    fontSize: 12,
+    fontWeight: 650,
   },
   reviewTables: {
     display: "flex",
@@ -1614,56 +1629,62 @@ const styles = {
   },
   readOnlyFieldGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-    gap: 10,
-    marginBottom: 14,
+    gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+    gap: "18px 16px",
   },
   reviewSubheading: {
     gridColumn: "1 / -1",
     margin: "4px 0 0",
     color: "#0f172a",
-    fontSize: 18,
-    fontWeight: 900,
+    fontSize: 15,
+    fontWeight: 700,
+    lineHeight: 1.35,
   },
   readOnlyField: {
-    border: "1px solid #e2e8f0",
-    borderRadius: 8,
-    background: "#f8fafc",
-    padding: 10,
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
   },
   readOnlyLabel: {
-    color: "#64748b",
-    fontSize: 14,
-    fontWeight: 900,
-    marginBottom: 5,
+    color: "#334155",
+    fontSize: 12,
+    fontWeight: 650,
   },
   readOnlyValue: {
+    width: "100%",
+    minHeight: 42,
+    display: "flex",
+    alignItems: "center",
+    border: "1px solid #d7dee9",
+    borderRadius: 8,
+    padding: "9px 11px",
     color: "#0f172a",
-    fontSize: 14,
+    background: "#fbfcfe",
+    fontSize: 12.5,
     whiteSpace: "pre-wrap",
-    lineHeight: 1.5,
+    lineHeight: 1.45,
   },
   readOnlyTableBlock: {
     marginTop: 8,
   },
   readOnlyTableTitle: {
-    margin: "0 0 8px",
-    padding: "10px 12px",
-    borderLeft: "4px solid #2563eb",
-    borderRadius: 6,
-    background: "#eff6ff",
+    margin: "0 0 9px",
+    padding: 0,
     color: "#0f172a",
-    fontSize: 18,
-    fontWeight: 900,
+    background: "transparent",
+    fontSize: 15,
+    fontWeight: 700,
+    lineHeight: 1.35,
   },
   readOnlyNotes: {
     margin: "0 0 8px",
     color: "#334155",
-    fontSize: 14,
+    fontSize: 12,
     lineHeight: 1.6,
   },
   readOnlyScroller: {
     overflowX: "auto",
+    border: "1px solid #d7dee8",
   },
   readOnlyTable: {
     width: "100%",
@@ -1672,20 +1693,23 @@ const styles = {
     tableLayout: "fixed",
   },
   readOnlyTh: {
-    padding: "9px 10px",
-    border: "1px solid #cbd5e1",
-    background: "#eef4fb",
-    color: "#334155",
-    fontSize: 14,
-    fontWeight: 900,
+    padding: "10px 11px",
+    borderBottom: "1px solid #334155",
+    borderRight: "1px solid #3a465b",
+    background: "#1e293b",
+    color: "#f8fafc",
+    fontSize: 11.5,
+    fontWeight: 700,
+    letterSpacing: ".025em",
     textAlign: "left",
     verticalAlign: "top",
   },
   readOnlyTd: {
-    padding: "9px 10px",
-    border: "1px solid #e2e8f0",
+    padding: "8px 9px",
+    borderBottom: "1px solid #dfe5ec",
+    borderRight: "1px solid #dfe5ec",
     color: "#0f172a",
-    fontSize: 14,
+    fontSize: 12.5,
     verticalAlign: "top",
     whiteSpace: "pre-wrap",
   },
@@ -1696,13 +1720,13 @@ const styles = {
   },
   attachmentLink: {
     color: "#2563eb",
-    fontSize: 14,
-    fontWeight: 900,
+    fontSize: 12,
+    fontWeight: 700,
     textDecoration: "none",
   },
   mutedText: {
     color: "#64748b",
-    fontSize: 14,
+    fontSize: 12,
   },
   sectionList: {
     display: "flex",
@@ -1737,16 +1761,26 @@ const styles = {
   },
   modalActions: {
     display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 12,
-    flexWrap: "wrap",
+    gap: 10,
   },
-  logoutModal: {
-    width: "min(380px, 92vw)",
-    background: "#fff",
-    borderRadius: 14,
-    padding: 24,
-    boxShadow: "0 20px 60px rgba(0,0,0,0.25)",
+  cancelButton: {
+    flex: 1,
+    border: "none",
+    borderRadius: 8,
+    background: "#f1f5f9",
+    color: "#475569",
+    padding: 10,
+    fontWeight: 900,
+    cursor: "pointer",
+  },
+  confirmButton: {
+    flex: 1,
+    border: "none",
+    borderRadius: 8,
+    background: "#dc2626",
+    color: "#fff",
+    padding: 10,
+    fontWeight: 900,
+    cursor: "pointer",
   },
 };
