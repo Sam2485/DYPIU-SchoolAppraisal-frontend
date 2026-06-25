@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { getApiErrorMessage } from "../../../api/client";
-import { createUser, fetchUsers } from "../../../api/users";
+import { createUser, deleteUser, fetchUsers, updateUser } from "../../../api/users";
 import { ADMINISTRATIVE_POSTS, SCHOOL_OPTIONS } from "./userManagementConfig";
 
 const emptyForm = {
@@ -49,6 +49,9 @@ const normalizeUser = (user = {}, index = 0) => {
 
 const postLabelFor = (value) => ADMINISTRATIVE_POSTS.find((post) => post.value === value)?.label || value;
 
+const formatDate = (date = new Date()) =>
+  new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric" }).format(date);
+
 function validate(form) {
   const errors = {};
   if (!form.category) errors.category = "Select Academic or Administrative.";
@@ -64,6 +67,36 @@ function validate(form) {
   return errors;
 }
 
+function validateEdit(form) {
+  const errors = {};
+  if (!form.category) errors.category = "Select Academic or Administrative.";
+  if (form.category === "academic" && !form.school) errors.school = "Select a school.";
+  if (form.category === "administrative" && !form.post) errors.post = "Select an administrative post.";
+  if (!form.name.trim()) errors.name = "Enter the user's name.";
+  if (!form.email.trim()) errors.email = "Enter an email address.";
+  else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) errors.email = "Enter a valid email address.";
+  if (form.password && form.password.length < 6) errors.password = "Password must contain at least 6 characters.";
+  if (form.password && form.password !== form.confirmPassword) errors.confirmPassword = "Passwords do not match.";
+  return errors;
+}
+
+const editFormFromUser = (user = {}) => {
+  const category = user.category === "administrative" ? "administrative" : "academic";
+  const postValue = ADMINISTRATIVE_POSTS.find((post) =>
+    post.value === user.post || post.label === user.post || post.label === user.assignment || post.value === user.designation
+  )?.value || "";
+
+  return {
+    category,
+    school: category === "academic" ? (user.school || user.schoolName || user.assignment || "") : "",
+    post: category === "administrative" ? postValue : "",
+    name: user.name === "-" ? "" : user.name || "",
+    email: user.email === "-" ? "" : user.email || "",
+    password: "",
+    confirmPassword: "",
+  };
+};
+
 export default function UserManagementPanel() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -73,8 +106,20 @@ export default function UserManagementPanel() {
   const [status, setStatus] = useState("");
   const [loadNotice, setLoadNotice] = useState("");
   const [creating, setCreating] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deletingId, setDeletingId] = useState("");
+  const [editTarget, setEditTarget] = useState(null);
+  const [editForm, setEditForm] = useState(emptyForm);
+  const [editErrors, setEditErrors] = useState({});
+  const [updatingId, setUpdatingId] = useState("");
 
   const schools = useMemo(() => SCHOOL_OPTIONS, []);
+  const userStats = useMemo(() => ({
+    total: users.length,
+    academic: users.filter((user) => user.category === "academic").length,
+    administrative: users.filter((user) => user.category === "administrative").length,
+    active: users.filter((user) => user.status === "active").length,
+  }), [users]);
 
   useEffect(() => {
     let isActive = true;
@@ -155,6 +200,90 @@ export default function UserManagementPanel() {
     }
   };
 
+  const openEdit = (user) => {
+    setEditTarget(user);
+    setEditForm(editFormFromUser(user));
+    setEditErrors({});
+    setStatus("");
+  };
+
+  const closeEdit = () => {
+    setEditTarget(null);
+    setEditForm(emptyForm);
+    setEditErrors({});
+  };
+
+  const updateEditField = (field, value) => {
+    setEditForm((current) => ({
+      ...current,
+      [field]: value,
+      ...(field === "category" ? { school: "", post: "" } : {}),
+      ...(field === "password" && !value ? { confirmPassword: "" } : {}),
+    }));
+    setEditErrors((current) => ({ ...current, [field]: "", ...(field === "category" ? { school: "", post: "" } : {}) }));
+    setStatus("");
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget?.id) return;
+
+    setDeletingId(deleteTarget.id);
+    setStatus("");
+
+    try {
+      await deleteUser(deleteTarget.id);
+      setUsers((current) => current.filter((user) => user.id !== deleteTarget.id));
+      setStatus(`${deleteTarget.name} deleted successfully.`);
+      setDeleteTarget(null);
+    } catch (error) {
+      setStatus(getApiErrorMessage(error, "Could not delete the user. The backend should provide DELETE /api/users/:id."));
+    } finally {
+      setDeletingId("");
+    }
+  };
+
+  const handleUpdate = async (event) => {
+    event.preventDefault();
+    if (!editTarget?.id) return;
+
+    const nextErrors = validateEdit(editForm);
+    setEditErrors(nextErrors);
+    if (Object.keys(nextErrors).length) return;
+
+    const isAcademic = editForm.category === "academic";
+    const payload = {
+      category: editForm.category,
+      role: isAcademic ? "director" : "administrative",
+      school: isAcademic ? editForm.school : "Administrative Office",
+      designation: isAcademic ? "Director" : postLabelFor(editForm.post),
+      post: isAcademic ? null : editForm.post,
+      name: editForm.name.trim(),
+      email: editForm.email.trim().toLowerCase(),
+      ...(editForm.password ? { password: editForm.password } : {}),
+    };
+
+    setUpdatingId(editTarget.id);
+    setStatus("");
+
+    try {
+      const { data } = await updateUser(editTarget.id, payload);
+      const updated = data?.data?.user || data?.user || data?.data || data || payload;
+      setUsers((current) =>
+        current.map((user) => user.id === editTarget.id ? normalizeUser({ ...user, ...payload, ...updated }) : user)
+      );
+      setStatus(`${payload.name} updated successfully.`);
+      closeEdit();
+    } catch (error) {
+      setStatus(getApiErrorMessage(error, "Could not update the user. The backend should provide PUT /api/users/:id."));
+    } finally {
+      setUpdatingId("");
+    }
+  };
+
+  const handlePrintUsers = () => {
+    window.setTimeout(() => window.print(), 80);
+  };
+
   return (
     <section style={styles.panel}>
       <div className="user-management-heading" style={styles.headingRow}>
@@ -163,9 +292,15 @@ export default function UserManagementPanel() {
           <h2 style={styles.title}>User Management</h2>
           <p style={styles.description}>View Academic and Administrative users or create a new account.</p>
         </div>
-        <button type="button" className="btn btn-primary" onClick={() => setShowForm((open) => !open)}>
-          {showForm ? "Close Form" : "+ Add New User"}
-        </button>
+        <div style={styles.headingActions}>
+          <button type="button" className="btn btn-secondary user-management-no-print" onClick={handlePrintUsers} disabled={loading || !users.length}>
+            <span aria-hidden="true">⎙</span>
+            Print Users
+          </button>
+          <button type="button" className="btn btn-primary user-management-no-print" onClick={() => setShowForm((open) => !open)}>
+            {showForm ? "Close Form" : "+ Add New User"}
+          </button>
+        </div>
       </div>
 
       {showForm && (
@@ -247,39 +382,286 @@ export default function UserManagementPanel() {
 
       <div style={styles.tableCard}>
         <div style={styles.tableHeading}>
-          <h3 style={styles.formTitle}>All Users</h3>
-          <span style={styles.count}>{users.length} users</span>
+          <div>
+            <h3 style={styles.formTitle}>All Users</h3>
+            <p style={styles.tableSubtext}>Manage every Academic, Administrative and authority account from one place.</p>
+          </div>
+          <div style={styles.tableBadges}>
+            <span style={styles.count}>{userStats.total} users</span>
+            <span style={styles.printHint}>Print-ready report available</span>
+          </div>
         </div>
 
         <div style={styles.scroller}>
           <table style={styles.table}>
             <thead>
               <tr>
-                {["Name", "Email", "Category", "School / Post", "Role", "Status"].map((column) => (
+                {["Name", "Email", "Category", "School / Post", "Role", "Status", "Action"].map((column) => (
                   <th key={column} style={styles.th}>{column}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan="6" style={styles.emptyCell}>Loading users...</td></tr>
+                <tr><td colSpan="7" style={styles.emptyCell}>Loading users...</td></tr>
               ) : users.length ? users.map((user) => (
                 <tr key={user.id}>
                   <td style={styles.td}><strong>{user.name}</strong></td>
                   <td style={styles.td}>{user.email}</td>
-                  <td style={styles.td}><span style={styles.categoryPill}>{user.category}</span></td>
+                  <td style={{ ...styles.td, ...styles.centerCell }}><span style={styles.categoryPill}>{user.category}</span></td>
                   <td style={styles.td}>{user.assignment}</td>
-                  <td style={styles.td}>{user.role}</td>
-                  <td style={styles.td}><span style={user.status === "active" ? styles.activeStatus : styles.inactiveStatus}>{user.status}</span></td>
+                  <td style={{ ...styles.td, ...styles.centerCell }}>{user.role}</td>
+                  <td style={{ ...styles.td, ...styles.centerCell }}><span style={user.status === "active" ? styles.activeStatus : styles.inactiveStatus}>{user.status}</span></td>
+                  <td style={{ ...styles.td, ...styles.actionCell }}>
+                    <div style={styles.actionGroup}>
+                      <button
+                        type="button"
+                        className="user-management-action-button user-management-action-button--edit"
+                        style={styles.editButton}
+                        onClick={() => openEdit(user)}
+                        disabled={updatingId === user.id}
+                        aria-label={`Edit ${user.name}`}
+                        title={`Edit ${user.name}`}
+                      >
+                        <span style={styles.editIcon} aria-hidden="true">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                            <path d="M4 16.5V20h3.5L18.1 9.4l-3.5-3.5L4 16.5Z" fill="currentColor" />
+                            <path d="m16 4.5 1.2-1.2a1.7 1.7 0 0 1 2.4 0l1.1 1.1a1.7 1.7 0 0 1 0 2.4L19.5 8 16 4.5Z" fill="currentColor" opacity=".75" />
+                          </svg>
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className="user-management-action-button user-management-action-button--delete"
+                        style={styles.deleteButton}
+                        onClick={() => setDeleteTarget(user)}
+                        disabled={deletingId === user.id}
+                        aria-label={`Delete ${user.name}`}
+                        title={`Delete ${user.name}`}
+                      >
+                        <span style={styles.deleteIcon} aria-hidden="true">
+                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+                            <path d="M9 3h6l1 2h4v2H4V5h4l1-2Z" fill="currentColor" />
+                            <path d="M6.5 9h11l-.7 10.2A2 2 0 0 1 14.8 21H9.2a2 2 0 0 1-2-1.8L6.5 9Z" fill="currentColor" opacity=".78" />
+                          </svg>
+                        </span>
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               )) : (
-                <tr><td colSpan="6" style={styles.emptyCell}>No users are available yet.</td></tr>
+                <tr><td colSpan="7" style={styles.emptyCell}>No users are available yet.</td></tr>
               )}
             </tbody>
           </table>
         </div>
       </div>
+
+      {deleteTarget && (
+        <div style={styles.modalOverlay} role="dialog" aria-modal="true" aria-labelledby="delete-user-title">
+          <div style={styles.modalCard}>
+            <div style={styles.warningIcon}>!</div>
+            <div>
+              <p style={styles.kicker}>Delete user</p>
+              <h3 id="delete-user-title" style={styles.modalTitle}>Remove this account?</h3>
+              <p style={styles.modalText}>
+                This will delete <strong>{deleteTarget.name}</strong> ({deleteTarget.email}) from user management.
+              </p>
+              <div style={styles.deleteUserPreview}>
+                <span style={styles.previewAvatar}>{deleteTarget.name?.charAt(0)?.toUpperCase() || "U"}</span>
+                <span>
+                  <strong>{deleteTarget.name}</strong>
+                  <small style={styles.previewMeta}>{deleteTarget.role} · {deleteTarget.assignment}</small>
+                </span>
+              </div>
+            </div>
+            <div style={styles.modalActions}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setDeleteTarget(null)}
+                disabled={deletingId === deleteTarget.id}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                style={styles.confirmDeleteButton}
+                onClick={handleDelete}
+                disabled={deletingId === deleteTarget.id}
+              >
+                {deletingId === deleteTarget.id ? "Deleting..." : "Yes, Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editTarget && (
+        <div style={styles.editOverlay} role="dialog" aria-modal="true" aria-labelledby="edit-user-title">
+          <form style={styles.editModalCard} onSubmit={handleUpdate}>
+            <div style={styles.editModalHeader}>
+              <span style={styles.editModalIcon} aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                  <path d="M4 16.5V20h3.5L18.1 9.4l-3.5-3.5L4 16.5Z" fill="currentColor" />
+                  <path d="m16 4.5 1.2-1.2a1.7 1.7 0 0 1 2.4 0l1.1 1.1a1.7 1.7 0 0 1 0 2.4L19.5 8 16 4.5Z" fill="currentColor" opacity=".75" />
+                </svg>
+              </span>
+              <div>
+                <p style={styles.kicker}>Edit user</p>
+                <h3 id="edit-user-title" style={styles.modalTitle}>Update account details</h3>
+                <p style={styles.modalText}>Correct wrong school/post, name, email or reset password if needed.</p>
+              </div>
+            </div>
+
+            <div style={styles.editCategoryGrid}>
+              {[
+                { value: "academic", label: "Academic", detail: "Director assigned to a school" },
+                { value: "administrative", label: "Administrative", detail: "Registrar, HR, DSW or Placement" },
+              ].map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  style={{ ...styles.categoryCard, ...(editForm.category === option.value ? styles.activeCategoryCard : {}) }}
+                  onClick={() => updateEditField("category", option.value)}
+                >
+                  <strong>{option.label}</strong>
+                  <span>{option.detail}</span>
+                </button>
+              ))}
+            </div>
+            {editErrors.category && <span style={styles.errorText}>{editErrors.category}</span>}
+
+            <div style={styles.editFieldGrid}>
+              {editForm.category === "academic" ? (
+                <Field label="School" error={editErrors.school}>
+                  <select className="audit-control" style={styles.control} value={editForm.school} onChange={(event) => updateEditField("school", event.target.value)}>
+                    <option value="">Select school</option>
+                    {schools.map((school) => (
+                      <option key={school.name} value={school.name}>
+                        {school.name}{school.code ? ` (${school.code})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              ) : (
+                <Field label="Administrative Post" error={editErrors.post}>
+                  <select className="audit-control" style={styles.control} value={editForm.post} onChange={(event) => updateEditField("post", event.target.value)}>
+                    <option value="">Select post</option>
+                    {ADMINISTRATIVE_POSTS.map((post) => <option key={post.value} value={post.value}>{post.label}</option>)}
+                  </select>
+                </Field>
+              )}
+
+              <Field label="Name" error={editErrors.name}>
+                <input className="audit-control" style={styles.control} value={editForm.name} onChange={(event) => updateEditField("name", event.target.value)} placeholder="Enter full name" />
+              </Field>
+
+              <Field label="Email ID" error={editErrors.email}>
+                <input className="audit-control" style={styles.control} type="email" value={editForm.email} onChange={(event) => updateEditField("email", event.target.value)} placeholder="name@dypiu.ac.in" />
+              </Field>
+
+              <Field label="New Password (Optional)" error={editErrors.password}>
+                <input className="audit-control" style={styles.control} type="password" value={editForm.password} onChange={(event) => updateEditField("password", event.target.value)} placeholder="Leave blank to keep existing password" />
+              </Field>
+
+              <Field label="Confirm New Password" error={editErrors.confirmPassword}>
+                <input className="audit-control" style={styles.control} type="password" value={editForm.confirmPassword} onChange={(event) => updateEditField("confirmPassword", event.target.value)} placeholder="Required only when changing password" disabled={!editForm.password} />
+              </Field>
+            </div>
+
+            <div style={styles.modalActions}>
+              <button type="button" className="btn btn-secondary" onClick={closeEdit} disabled={updatingId === editTarget.id}>
+                Cancel
+              </button>
+              <button type="submit" className="btn btn-primary" disabled={updatingId === editTarget.id}>
+                {updatingId === editTarget.id ? "Saving..." : "Save Changes"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      <PrintableUsersReport users={users} stats={userStats} />
     </section>
+  );
+}
+
+function PrintableUsersReport({ users, stats }) {
+  return (
+    <section className="user-report-print-area" aria-hidden="true">
+      <div className="user-report-sheet">
+        <header className="user-report-cover">
+          <div>
+            <p>DY Patil International University, Akurdi Pune</p>
+            <h1>User Management Register</h1>
+            <span>IQAC Administrative Access Report</span>
+          </div>
+          <div className="user-report-date">
+            <small>Generated on</small>
+            <strong>{formatDate()}</strong>
+          </div>
+        </header>
+
+        <div className="user-report-summary">
+          <ReportStat label="Total Users" value={stats.total} />
+          <ReportStat label="Academic" value={stats.academic} />
+          <ReportStat label="Administrative" value={stats.administrative} />
+          <ReportStat label="Active" value={stats.active} />
+        </div>
+
+        <div className="user-report-section-heading">
+          <span>01</span>
+          <div>
+            <h2>All Registered Users</h2>
+            <p>Complete list of accounts configured for the appraisal portal.</p>
+          </div>
+        </div>
+
+        <table className="user-report-table">
+          <thead>
+            <tr>
+              <th>Sr No</th>
+              <th>Name</th>
+              <th>Email</th>
+              <th>Category</th>
+              <th>School / Post</th>
+              <th>Role</th>
+            </tr>
+          </thead>
+          <tbody>
+            {users.length ? users.map((user, index) => (
+              <tr key={user.id}>
+                <td>{index + 1}</td>
+                <td>{user.name}</td>
+                <td>{user.email}</td>
+                <td>{user.category}</td>
+                <td>{user.assignment}</td>
+                <td>{user.role}</td>
+              </tr>
+            )) : (
+              <tr>
+                <td colSpan="6">No users are available.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+
+        <footer className="user-report-footer">
+          <span>Prepared by IQAC</span>
+          <span>School Appraisal Portal</span>
+        </footer>
+      </div>
+    </section>
+  );
+}
+
+function ReportStat({ label, value }) {
+  return (
+    <div>
+      <strong>{value}</strong>
+      <span>{label}</span>
+    </div>
   );
 }
 
@@ -296,6 +678,7 @@ function Field({ label, error, children }) {
 const styles = {
   panel: { display: "flex", flexDirection: "column", gap: 18 },
   headingRow: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 18, padding: 20, border: "1px solid #e2e8f0", borderRadius: 16, background: "#fff", boxShadow: "0 12px 35px rgba(15,23,42,.045)" },
+  headingActions: { display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 10, flexWrap: "wrap" },
   kicker: { margin: "0 0 5px", color: "#2563eb", fontSize: 10, fontWeight: 750, letterSpacing: ".08em", textTransform: "uppercase" },
   title: { margin: "0 0 5px", color: "#0f172a", fontSize: 20, fontWeight: 700 },
   description: { margin: 0, color: "#64748b", fontSize: 12.5 },
@@ -317,13 +700,39 @@ const styles = {
   apiNotice: { padding: "10px 12px", border: "1px solid #bae6fd", borderRadius: 10, color: "#075985", background: "#f0f9ff", fontSize: 12, fontWeight: 650 },
   tableCard: { overflow: "hidden", border: "1px solid #e2e8f0", borderRadius: 16, background: "#fff", boxShadow: "0 12px 35px rgba(15,23,42,.045)" },
   tableHeading: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "18px 20px", borderBottom: "1px solid #edf1f6" },
+  tableSubtext: { margin: "5px 0 0", color: "#64748b", fontSize: 11.5 },
+  tableBadges: { display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" },
   count: { padding: "5px 8px", borderRadius: 999, color: "#475569", background: "#f1f5f9", fontSize: 10.5, fontWeight: 700 },
+  printHint: { padding: "5px 8px", borderRadius: 999, color: "#1d4ed8", background: "#eff6ff", fontSize: 10.5, fontWeight: 750 },
   scroller: { overflowX: "auto" },
   table: { width: "100%", borderCollapse: "collapse", tableLayout: "fixed" },
   th: { padding: "10px 11px", borderRight: "1px solid #3a465b", color: "#f8fafc", background: "#1e293b", fontSize: 11.5, fontWeight: 700, textAlign: "left" },
   td: { padding: "11px", borderRight: "1px solid #dfe5ec", borderBottom: "1px solid #dfe5ec", color: "#334155", fontSize: 12, overflowWrap: "anywhere" },
+  centerCell: { textAlign: "center", verticalAlign: "middle" },
+  actionCell: { width: 96, textAlign: "center" },
   emptyCell: { padding: 28, color: "#64748b", fontSize: 12, textAlign: "center" },
   categoryPill: { textTransform: "capitalize", color: "#1d4ed8", fontWeight: 700 },
   activeStatus: { display: "inline-flex", padding: "4px 7px", borderRadius: 999, color: "#166534", background: "#dcfce7", fontSize: 10.5, fontWeight: 700, textTransform: "capitalize" },
   inactiveStatus: { display: "inline-flex", padding: "4px 7px", borderRadius: 999, color: "#991b1b", background: "#fee2e2", fontSize: 10.5, fontWeight: 700, textTransform: "capitalize" },
+  actionGroup: { display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 0, padding: 3, border: "1px solid #dbe4f0", borderRadius: 12, background: "#f8fafc", boxShadow: "inset 0 1px 0 rgba(255,255,255,.9)" },
+  editButton: { width: 34, height: 32, display: "grid", placeItems: "center", border: 0, borderRight: "1px solid #e2e8f0", borderRadius: "9px 0 0 9px", color: "#2563eb", background: "transparent", cursor: "pointer", fontFamily: "inherit" },
+  editIcon: { width: 24, height: 24, display: "grid", placeItems: "center", borderRadius: 8, color: "inherit", background: "transparent", flex: "0 0 auto" },
+  deleteButton: { width: 34, height: 32, display: "grid", placeItems: "center", border: 0, borderRadius: "0 9px 9px 0", color: "#dc2626", background: "transparent", cursor: "pointer", fontFamily: "inherit" },
+  deleteIcon: { width: 24, height: 24, display: "grid", placeItems: "center", borderRadius: 8, color: "inherit", background: "transparent", flex: "0 0 auto" },
+  modalOverlay: { position: "fixed", inset: 0, zIndex: 80, display: "grid", placeItems: "center", padding: 20, background: "rgba(15, 23, 42, .52)", backdropFilter: "blur(4px)" },
+  modalCard: { width: "min(460px, 100%)", display: "grid", gridTemplateColumns: "48px 1fr", gap: 15, padding: 22, borderRadius: 22, border: "1px solid #fee2e2", background: "linear-gradient(180deg, #fff 0%, #fffafa 100%)", boxShadow: "0 28px 80px rgba(15,23,42,.22)" },
+  warningIcon: { width: 46, height: 46, display: "grid", placeItems: "center", borderRadius: 16, color: "#b91c1c", background: "linear-gradient(135deg, #fee2e2, #fecaca)", fontSize: 21, fontWeight: 900, boxShadow: "inset 0 0 0 1px rgba(185,28,28,.08)" },
+  modalTitle: { margin: "0 0 8px", color: "#0f172a", fontSize: 18, fontWeight: 800 },
+  modalText: { margin: 0, color: "#475569", fontSize: 13, lineHeight: 1.55 },
+  deleteUserPreview: { display: "flex", alignItems: "center", gap: 10, marginTop: 14, padding: 10, border: "1px solid #fee2e2", borderRadius: 14, background: "#fff", color: "#0f172a", fontSize: 12 },
+  previewAvatar: { width: 34, height: 34, display: "grid", placeItems: "center", borderRadius: 12, color: "#fff", background: "linear-gradient(135deg, #ef4444, #f97316)", fontWeight: 900 },
+  previewMeta: { display: "block", marginTop: 2, color: "#64748b", fontSize: 11 },
+  modalActions: { gridColumn: "1 / -1", display: "flex", justifyContent: "flex-end", gap: 10, paddingTop: 6 },
+  confirmDeleteButton: { border: "1px solid #dc2626", borderRadius: 10, padding: "10px 14px", color: "#fff", background: "linear-gradient(135deg, #ef4444, #b91c1c)", fontSize: 12.5, fontWeight: 800, cursor: "pointer", fontFamily: "inherit", boxShadow: "0 10px 24px rgba(220, 38, 38, .22)" },
+  editOverlay: { position: "fixed", inset: 0, zIndex: 78, display: "grid", placeItems: "center", padding: 20, background: "rgba(15, 23, 42, .48)", backdropFilter: "blur(4px)", overflowY: "auto" },
+  editModalCard: { width: "min(780px, 100%)", display: "flex", flexDirection: "column", gap: 16, padding: 22, border: "1px solid #dbeafe", borderRadius: 22, background: "linear-gradient(180deg, #fff 0%, #f8fbff 100%)", boxShadow: "0 28px 80px rgba(15,23,42,.22)" },
+  editModalHeader: { display: "flex", alignItems: "flex-start", gap: 14, paddingBottom: 14, borderBottom: "1px solid #e2e8f0" },
+  editModalIcon: { width: 46, height: 46, flex: "0 0 46px", display: "grid", placeItems: "center", borderRadius: 16, color: "#1d4ed8", background: "linear-gradient(135deg, #dbeafe, #bfdbfe)", boxShadow: "inset 0 0 0 1px rgba(37,99,235,.08)" },
+  editCategoryGrid: { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12 },
+  editFieldGrid: { display: "grid", gridTemplateColumns: "repeat(2, minmax(220px, 1fr))", gap: "15px 14px" },
 };
