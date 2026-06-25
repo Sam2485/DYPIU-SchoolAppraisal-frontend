@@ -54,7 +54,7 @@ function FieldGrid({ fields, values, onFieldChange }) {
   );
 }
 
-function TableList({ tableDefinitions, tableValues, values, onFieldChange, onTableChange, onAddRow, onDeleteLastRow, onUploadAttachment }) {
+function TableList({ tableDefinitions, tableValues, values, onFieldChange, onTableChange, onAddRow, onDeleteLastRow, onUploadAttachment, onDeleteAttachment }) {
   return (
     <div style={styles.tables}>
       {tableDefinitions.map((table) => (
@@ -68,13 +68,14 @@ function TableList({ tableDefinitions, tableValues, values, onFieldChange, onTab
           onAddRow={onAddRow}
           onDeleteLastRow={onDeleteLastRow}
           onUploadAttachment={onUploadAttachment}
+          onDeleteAttachment={onDeleteAttachment}
         />
       ))}
     </div>
   );
 }
 
-export default function AuditSection({ section, values, tables, onFieldChange, onTableChange, onAddRow, onDeleteLastRow, onUploadAttachment }) {
+export default function AuditSection({ section, values, tables, onFieldChange, onTableChange, onAddRow, onDeleteLastRow, onUploadAttachment, onDeleteAttachment }) {
   const blocks = section.blocks || [
     ...(section.fields?.length ? [{ type: "fields", fields: section.fields }] : []),
     ...(section.tables?.length ? [{ type: "tables", tables: section.tables }] : []),
@@ -102,6 +103,7 @@ export default function AuditSection({ section, values, tables, onFieldChange, o
             onAddRow={onAddRow}
             onDeleteLastRow={onDeleteLastRow}
             onUploadAttachment={onUploadAttachment}
+            onDeleteAttachment={onDeleteAttachment}
           />
         );
       })}

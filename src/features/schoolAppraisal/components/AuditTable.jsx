@@ -15,11 +15,13 @@ export default function AuditTable({
   onAddRow,
   onDeleteLastRow,
   onUploadAttachment,
+  onDeleteAttachment,
 }) {
   const columns = columnsWithSerial(table.columns);
   const fitToContainer = table.fitToContainer !== false;
   const denseTable = columns.length >= 9;
   const [uploadingCell, setUploadingCell] = useState("");
+  const [deletingAttachment, setDeletingAttachment] = useState("");
   const [uploadError, setUploadError] = useState("");
 
   const handleCellChange = (rowIndex, column, value) => {
@@ -64,6 +66,44 @@ export default function AuditTable({
       setUploadError(getApiErrorMessage(error, "Attachment upload failed."));
     } finally {
       setUploadingCell("");
+    }
+  };
+
+  const handleAttachmentDelete = async (rowIndex, column, attachment) => {
+    if (!attachment?.url) {
+      setUploadError("Could not delete attachment because its URL is missing.");
+      return;
+    }
+
+    if (!window.confirm(`Remove ${attachment.name || attachment.fileName || "this attachment"}?`)) return;
+
+    const attachmentKey = `${rowIndex}-${column}-${attachment.url}`;
+    setDeletingAttachment(attachmentKey);
+    setUploadError("");
+
+    try {
+      await onDeleteAttachment?.(attachment);
+      const currentFiles = Array.isArray(rows[rowIndex]?.[column])
+        ? rows[rowIndex][column]
+        : rows[rowIndex]?.[column]
+          ? [rows[rowIndex][column]]
+          : [];
+      handleCellChange(
+        rowIndex,
+        column,
+        currentFiles.filter((file) => file.url !== attachment.url),
+      );
+    } catch (error) {
+      const status = error?.response?.status;
+      if (status === 400) {
+        setUploadError(error?.response?.data?.message || "Could not delete attachment.");
+      } else if (status === 404) {
+        setUploadError("File not found.");
+      } else {
+        setUploadError("Could not delete attachment.");
+      }
+    } finally {
+      setDeletingAttachment("");
     }
   };
 
@@ -145,16 +185,27 @@ export default function AuditTable({
                                   <span style={styles.fileType}>PDF document</span>
                                 </span>
                                 {file.url && (
-                                  <a
-                                    className="audit-attachment-view"
-                                    href={file.url}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    style={styles.attachmentLink}
-                                    aria-label={`View ${file.name || "attachment"}`}
-                                  >
-                                    View
-                                  </a>
+                                  <span style={styles.attachmentItemActions}>
+                                    <a
+                                      className="audit-attachment-view"
+                                      href={file.url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      style={styles.attachmentLink}
+                                      aria-label={`View ${file.name || "attachment"}`}
+                                    >
+                                      View
+                                    </a>
+                                    <button
+                                      type="button"
+                                      style={styles.deleteAttachmentButton}
+                                      onClick={() => handleAttachmentDelete(rowIndex, column, file)}
+                                      disabled={deletingAttachment === `${rowIndex}-${column}-${file.url}`}
+                                      aria-label={`Remove ${file.name || "attachment"}`}
+                                    >
+                                      {deletingAttachment === `${rowIndex}-${column}-${file.url}` ? "Removing..." : "Remove"}
+                                    </button>
+                                  </span>
                                 )}
                               </span>
                             ))}
@@ -473,6 +524,21 @@ const styles = {
     fontSize: 11,
     fontWeight: 750,
     textDecoration: "none",
+  },
+  attachmentItemActions: {
+    display: "flex",
+    flex: "0 0 auto",
+    alignItems: "center",
+    gap: 8,
+  },
+  deleteAttachmentButton: {
+    border: 0,
+    color: "#b91c1c",
+    background: "transparent",
+    padding: 0,
+    fontSize: 10.5,
+    fontWeight: 750,
+    cursor: "pointer",
   },
   fileName: {
     overflow: "hidden",

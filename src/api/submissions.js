@@ -223,6 +223,11 @@ export const uploadAttachments = async (files) => {
   }));
 };
 
+export const deleteAttachment = (attachment) =>
+  apiClient.delete("/api/attachments/delete", {
+    data: { url: attachment.url },
+  });
+
 export const fetchAllSubmissions = () => apiClient.get("/api/submissions/all");
 export const fetchSubmissionById = (id) => apiClient.get(`/api/submissions/${id}`);
 export const fetchSubmissionSnapshots = (id) => apiClient.get(`/api/submissions/${id}/snapshots`);
