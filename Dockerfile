@@ -1,23 +1,20 @@
-FROM node:22-alpine AS build
+FROM node:24-alpine AS build
 
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm install --no-audit --no-fund
 
 COPY . .
 RUN npm run build
 
-FROM nginx:1.27-alpine
+FROM nginx:1.30.3-alpine
 
-COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
-COPY deploy/env-config.template.js /opt/app/env-config.template.js
-COPY deploy/40-env-config.sh /docker-entrypoint.d/40-env-config.sh
+COPY deploy/default.conf.template /etc/nginx/templates/default.conf.template
 COPY --from=build /app/dist /usr/share/nginx/html
 
-RUN chmod +x /docker-entrypoint.d/40-env-config.sh
-
-ENV VITE_API_BASE_URL=https://schoolappraisal-backend-919405994318.asia-south1.run.app
+ENV VITE_API_BASE_URL=""
+ENV BACKEND_URL=https://schoolappraisal-backend-919405994318.asia-south1.run.app
 ENV PORT=8080
 
 EXPOSE 8080
