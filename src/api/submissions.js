@@ -13,6 +13,67 @@ const safeJsonParse = (value, fallback) => {
 
 export const normalizeRole = (role = "") => String(role).trim().toLowerCase().replaceAll("_", "-");
 
+export const SIGN_OFF_FIELD = "__auditSignOff";
+
+export const signOffProfileFromSession = (fallbackRole = "") => ({
+  name: sessionStorage.getItem("name") || "",
+  designation: sessionStorage.getItem("designation") || "",
+  role: normalizeRole(sessionStorage.getItem("role") || fallbackRole),
+});
+
+export const withSubmitterSignOff = (values = {}, profile = signOffProfileFromSession(), submittedAt = new Date().toISOString()) => ({
+  ...values,
+  [SIGN_OFF_FIELD]: {
+    ...(values[SIGN_OFF_FIELD] || {}),
+    submittedBy: {
+      ...(values[SIGN_OFF_FIELD]?.submittedBy || {}),
+      name: profile.name,
+      designation: profile.designation,
+      role: profile.role,
+      date: submittedAt,
+    },
+  },
+});
+
+export const withApproverSignOff = (values = {}, profile = signOffProfileFromSession(), approvedAt = new Date().toISOString()) => ({
+  ...values,
+  [SIGN_OFF_FIELD]: {
+    ...(values[SIGN_OFF_FIELD] || {}),
+    approvedBy: {
+      name: profile.name,
+      designation: profile.designation,
+      role: profile.role,
+      date: approvedAt,
+    },
+  },
+});
+
+export const getSubmissionSignOff = (submission = {}, values = {}) => {
+  const stored = values[SIGN_OFF_FIELD] || {};
+  const approvedRole = normalizeRole(
+    stored.approvedBy?.role ||
+    submission.reviewedByRole ||
+    submission.reviewerRole ||
+    submission.approvedByRole ||
+    "",
+  );
+
+  return {
+    submittedBy: {
+      name: stored.submittedBy?.name || submission.submittedByName || submission.submittedBy || submission.createdBy || submission.user?.name || "",
+      designation: stored.submittedBy?.designation || submission.submittedByDesignation || submission.submitterDesignation || submission.user?.designation || "",
+      role: normalizeRole(stored.submittedBy?.role || submission.submittedByRole || submission.user?.role || ""),
+      date: stored.submittedBy?.date || submission.submittedOn || submission.submittedAt || submission.createdAt || "",
+    },
+    approvedBy: {
+      name: stored.approvedBy?.name || submission.reviewedByName || submission.reviewedBy || submission.approvedBy || "",
+      designation: stored.approvedBy?.designation || submission.reviewedByDesignation || submission.reviewerDesignation || submission.approvedByDesignation || "",
+      role: approvedRole,
+      date: stored.approvedBy?.date || submission.reviewedOn || submission.reviewedAt || submission.approvedOn || submission.approvedAt || "",
+    },
+  };
+};
+
 export const dashboardForRole = (role) => {
   const normalizedRole = normalizeRole(role);
   const dashboards = {
@@ -43,6 +104,11 @@ export const normalizeDraft = (payload = {}, fallbackValues = {}, fallbackTables
   const draft = payload.data || payload.submission || payload;
   const valuesData = draft.valuesData ?? draft.values ?? draft.fieldsData ?? draft.fields;
   const tablesData = draft.tablesData ?? draft.tables;
+  const values = {
+    ...fallbackValues,
+    ...safeJsonParse(valuesData, {}),
+  };
+  const status = String(draft.status || "").trim().toLowerCase().replaceAll("_", "-");
 
   return {
     id: draft.id || draft.submissionId || null,
@@ -54,10 +120,9 @@ export const normalizeDraft = (payload = {}, fallbackValues = {}, fallbackTables
       draft.attachments ||
       draft.status,
     ),
-    values: {
-      ...fallbackValues,
-      ...safeJsonParse(valuesData, {}),
-    },
+    status,
+    isSubmitted: Boolean(values[SIGN_OFF_FIELD]?.submittedBy?.date) || Boolean(status && status !== "draft"),
+    values,
     tables: {
       ...fallbackTables,
       ...safeJsonParse(tablesData, {}),

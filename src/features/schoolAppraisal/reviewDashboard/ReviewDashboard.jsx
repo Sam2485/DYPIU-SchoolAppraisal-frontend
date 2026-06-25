@@ -1,11 +1,22 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getApiErrorMessage } from "../../../api/client";
-import { fetchAllSubmissions, fetchSubmissionById, fetchSubmissionSnapshots, parseSubmissionFormData, reviewSubmission } from "../../../api/submissions";
+import {
+  SIGN_OFF_FIELD,
+  fetchAllSubmissions,
+  fetchSubmissionById,
+  fetchSubmissionSnapshots,
+  getSubmissionSignOff,
+  parseSubmissionFormData,
+  reviewSubmission,
+  withApproverSignOff,
+} from "../../../api/submissions";
 import universityLogo from "../../../assets/images/image.png";
 import AppSidebar from "../components/AppSidebar";
+import AuditReportPanel from "../components/AuditReportPanel";
 import { columnsWithSerial } from "../components/tableHelpers";
-import { administrativeAuditModules } from "../administrativeAudit/administrativeAuditConfig";
+import { administrativeAuditMeta, administrativeAuditModules } from "../administrativeAudit/administrativeAuditConfig";
+import AdministrativeReportPanel from "../administrativeAudit/AdministrativeReportPanel";
 import { academicAudit2025Schema } from "../formSchemas";
 
 const REVIEW_NAV_ITEMS = [
@@ -88,16 +99,23 @@ const submissionPayload = (payload) => payload?.data?.submission || payload?.dat
 const normalizeSubmission = (submission = {}) => {
   const auditType = normalizeAuditType(submission.auditType || submission.type);
   const formData = parseSubmissionFormData(submission);
+  const signOff = getSubmissionSignOff(submission, formData.values);
+  const values = { ...formData.values, [SIGN_OFF_FIELD]: signOff };
 
   return {
     ...submission,
     ...formData,
+    values,
     id: submission.id || submission.submissionId,
     auditType,
     group: submission.group || submission.schoolGroup || "all",
     school: submission.school || submission.schoolName || submission.department || "School",
-    submittedBy: submission.submittedBy || submission.createdBy || submission.userName || submission.user?.name || "-",
-    submittedOn: submission.submittedOn || submission.submittedAt || submission.createdAt || new Date().toISOString(),
+    submittedBy: signOff.submittedBy.name || submission.userName || "-",
+    submittedOn: signOff.submittedBy.date || new Date().toISOString(),
+    reviewedBy: signOff.approvedBy.name,
+    reviewedByDesignation: signOff.approvedBy.designation,
+    reviewedByRole: signOff.approvedBy.role,
+    reviewedOn: signOff.approvedBy.date,
     sections: submission.sections || sectionsForAudit(auditType),
     attachments: formData.attachments.length ? formData.attachments : submission.attachments || [],
     status: normalizeStatus(submission.status),
@@ -205,16 +223,32 @@ export default function ReviewDashboard() {
     setError("");
 
     try {
+      const reviewedOn = new Date().toISOString();
+      const reviewer = { ...profile, role };
+      const signedValues = status === "approved"
+        ? withApproverSignOff(submission.values, reviewer, reviewedOn)
+        : submission.values;
+
       await reviewSubmission(submission.id, {
         status: backendStatusFor(status),
         remarks: submission.remarks,
+        ...(status === "approved" ? {
+          reviewedBy: profile.name,
+          reviewedByDesignation: profile.designation,
+          reviewedByRole: role,
+          reviewedOn,
+        } : {}),
       });
 
       updateSubmission(submission.auditType, submission.id, {
         status,
-        reviewedBy: profile.name,
-        reviewedOn: new Date().toISOString(),
+        values: signedValues,
+        reviewedBy: status === "approved" ? profile.name : submission.reviewedBy,
+        reviewedByDesignation: status === "approved" ? profile.designation : submission.reviewedByDesignation,
+        reviewedByRole: status === "approved" ? role : submission.reviewedByRole,
+        reviewedOn: status === "approved" ? reviewedOn : submission.reviewedOn,
       });
+
     } catch (reviewError) {
       setError(getApiErrorMessage(reviewError, "Could not update review status."));
     } finally {
@@ -287,7 +321,7 @@ export default function ReviewDashboard() {
             <AdvancedOverviewPanel metrics={metrics} submissions={allSubmissions} loading={loadingSubmissions} />
           ) : null}
 
-          {error && <div style={styles.errorNotice}>{error}</div>}
+          {error && <div className="review-error-notice" style={styles.errorNotice}>{error}</div>}
           {loadingSubmissionId && <div style={styles.emptyDraftNotice}>Loading submission details...</div>}
 
           {!selectedSubmission && activeView === "academic" && (
@@ -557,10 +591,34 @@ function FullFormReview({ submission, onBack, onRemarksChange, onApprove, onSend
   };
   const sections = sectionsForAudit(submission.auditType);
   const [activeSectionIndex, setActiveSectionIndex] = useState(0);
+  const [reportMode, setReportMode] = useState(false);
   const isLastSection = activeSectionIndex === sections.length - 1;
   const hasRemarks = Boolean(submission.remarks.trim());
   const goToPreviousSection = () => setActiveSectionIndex((index) => Math.max(0, index - 1));
   const goToNextSection = () => setActiveSectionIndex((index) => Math.min(sections.length - 1, index + 1));
+
+  if (reportMode) {
+    return (
+      <section style={styles.fullReviewPage}>
+        {submission.auditType === "academic" ? (
+          <>
+            <div className="review-report-actions" style={styles.cardActions}>
+              <button type="button" className="btn btn-secondary" onClick={() => setReportMode(false)}>Close Report</button>
+              <button type="button" className="btn btn-primary" onClick={() => window.print()}>Print Report</button>
+            </div>
+            <AuditReportPanel schema={academicAudit2025Schema} values={submission.values} tables={submission.tables} />
+          </>
+        ) : (
+          <AdministrativeReportPanel
+            meta={administrativeAuditMeta}
+            modules={administrativeAuditModules}
+            data={{ fields: submission.values, tables: submission.tables }}
+            onClose={() => setReportMode(false)}
+          />
+        )}
+      </section>
+    );
+  }
 
   return (
     <section style={styles.fullReviewPage}>
@@ -612,15 +670,25 @@ function FullFormReview({ submission, onBack, onRemarksChange, onApprove, onSend
             </label>
             <div style={styles.finalActionRow}>
               <span style={styles.reviewHint}>
-                Approve and Send Back are enabled after remarks are written.
+                {submission.status === "approved"
+                  ? "This form is approved and ready for its signed final report."
+                  : "Approve and Send Back are enabled after remarks are written."}
               </span>
               <div style={styles.cardActions}>
-                <button type="button" className="btn btn-primary" onClick={onApprove} disabled={!hasRemarks || Boolean(reviewingStatus)}>
-                  {reviewingStatus === "approved" ? "Approving..." : "Approve"}
-                </button>
-                <button type="button" className="btn btn-danger" onClick={onSendBack} disabled={!hasRemarks || Boolean(reviewingStatus)}>
-                  {reviewingStatus === "sent-back" ? "Sending..." : "Send Back"}
-                </button>
+                {submission.status === "approved" ? (
+                  <button type="button" className="btn btn-secondary" onClick={() => setReportMode(true)}>
+                    Generate Report
+                  </button>
+                ) : (
+                  <>
+                    <button type="button" className="btn btn-primary" onClick={onApprove} disabled={!hasRemarks || Boolean(reviewingStatus)}>
+                      {reviewingStatus === "approved" ? "Approving..." : "Approve"}
+                    </button>
+                    <button type="button" className="btn btn-danger" onClick={onSendBack} disabled={!hasRemarks || Boolean(reviewingStatus)}>
+                      {reviewingStatus === "sent-back" ? "Sending..." : "Send Back"}
+                    </button>
+                  </>
+                )}
               </div>
             </div>
             {!!submission.snapshots?.length && (
@@ -890,7 +958,8 @@ function PrintStyles() {
       }
       @media print {
         .app-sidebar,
-        .btn {
+        .btn,
+        .review-error-notice {
           display: none !important;
         }
         .review-dashboard-shell {

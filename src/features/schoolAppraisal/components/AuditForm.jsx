@@ -1,7 +1,7 @@
 //contains all the schema for academic audit 2025-26 form
 import { useEffect, useMemo, useState } from "react";
 import { getApiErrorMessage } from "../../../api/client";
-import { buildSubmissionPayload, fetchMyDraft, normalizeDraft, saveDraft, submitDraft, uploadAttachment } from "../../../api/submissions";
+import { buildSubmissionPayload, fetchMyDraft, normalizeDraft, saveDraft, signOffProfileFromSession, submitDraft, uploadAttachment, withSubmitterSignOff } from "../../../api/submissions";
 import universityLogo from "../../../assets/images/image.png";
 import AuditReportPanel from "./AuditReportPanel";
 import AuditSection from "./AuditSection";
@@ -74,9 +74,11 @@ export default function AuditForm({ schema, activeSectionId, reportMode, onRepor
   const [savingDraft, setSavingDraft] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [hasExistingSubmission, setHasExistingSubmission] = useState(false);
+  const [isSubmitted, setIsSubmitted] = useState(false);
   const [printReportAfterRender, setPrintReportAfterRender] = useState(false);
   const activeSectionIndex = Math.max(0, schema.sections.findIndex((section) => section.id === activeSectionId));
-  const progress = activeSectionId === "summary" ? 100 : Math.round(((activeSectionIndex + 1) / schema.sections.length) * 100);
+  const isLastSection = activeSectionIndex === schema.sections.length - 1;
+  const progress = Math.round(((activeSectionIndex + 1) / schema.sections.length) * 100);
 
   useEffect(() => {
     if (!reportMode || !printReportAfterRender) return undefined;
@@ -105,6 +107,7 @@ export default function AuditForm({ schema, activeSectionId, reportMode, onRepor
         setTables(draft.tables);
         setAttachments(draft.attachments);
         setHasExistingSubmission(draft.exists);
+        setIsSubmitted(draft.isSubmitted);
       } catch (error) {
         if (isActive) setStatus(getApiErrorMessage(error, "Could not load your draft from the server."));
       } finally {
@@ -175,7 +178,7 @@ export default function AuditForm({ schema, activeSectionId, reportMode, onRepor
       setHasExistingSubmission(true);
       setStatus("Draft saved successfully.");
 
-      const sectionIds = [...schema.sections.map((section) => section.id), "summary"];
+      const sectionIds = schema.sections.map((section) => section.id);
       const currentIndex = sectionIds.indexOf(activeSectionId);
       const nextSectionId = sectionIds[Math.min(currentIndex + 1, sectionIds.length - 1)];
 
@@ -191,9 +194,12 @@ export default function AuditForm({ schema, activeSectionId, reportMode, onRepor
   };
 
   const handleClear = () => {
+    if (!window.confirm("Are you sure you want to clear the form? All unsaved changes will be lost.")) return;
+
     setValues(initialValues);
     setTables(initialTables);
     setAttachments([]);
+    setIsSubmitted(false);
     setStatus("Form cleared.");
   };
 
@@ -207,8 +213,11 @@ export default function AuditForm({ schema, activeSectionId, reportMode, onRepor
     setSubmitStatus("");
 
     try {
-      await submitDraft(currentPayload(), { isUpdate: hasExistingSubmission });
+      const signedValues = withSubmitterSignOff(values, signOffProfileFromSession("director"));
+      await submitDraft(buildSubmissionPayload({ auditType, values: signedValues, tables, attachments }), { isUpdate: hasExistingSubmission });
+      setValues(signedValues);
       setHasExistingSubmission(true);
+      setIsSubmitted(true);
       setSubmitStatus("Academic Audit submitted successfully.");
     } catch (error) {
       setSubmitStatus(getApiErrorMessage(error, "Could not submit Academic Audit."));
@@ -265,87 +274,47 @@ export default function AuditForm({ schema, activeSectionId, reportMode, onRepor
       {loadingDraft && <div style={styles.status}>Loading draft from server...</div>}
 
       <div style={styles.sections}>
-        {activeSectionId === "summary" ? (
-          <SummaryPanel
-            schema={schema}
-            values={values}
-            tables={tables}
-            submitStatus={submitStatus}
-            onGenerateReport={handleGenerateReport}
-            onSubmit={handleSubmit}
-            submitting={submitting}
-          />
-        ) : (
-          schema.sections
-            .filter((section) => !activeSectionId || section.id === activeSectionId)
-            .map((section) => (
-              <AuditSection
-                key={section.id}
-                section={section}
-                values={values}
-                tables={tables}
-                onFieldChange={handleFieldChange}
-                onTableChange={handleTableChange}
-                onAddRow={handleAddRow}
-                onDeleteLastRow={handleDeleteLastRow}
-                onUploadAttachment={async (file) => {
-                  const uploaded = await uploadAttachment(file);
-                  setAttachments((current) => [...current, uploaded]);
-                  return uploaded;
-                }}
-              />
-            ))
-        )}
+        {schema.sections
+          .filter((section) => !activeSectionId || section.id === activeSectionId)
+          .map((section) => (
+            <AuditSection
+              key={section.id}
+              section={section}
+              values={values}
+              tables={tables}
+              onFieldChange={handleFieldChange}
+              onTableChange={handleTableChange}
+              onAddRow={handleAddRow}
+              onDeleteLastRow={handleDeleteLastRow}
+              onUploadAttachment={async (file) => {
+                const uploaded = await uploadAttachment(file);
+                setAttachments((current) => [...current, uploaded]);
+                return uploaded;
+              }}
+            />
+          ))}
       </div>
 
-      {activeSectionId !== "summary" && (
-        <div style={styles.sectionFooter}>
+      <div style={styles.sectionFooter}>
+        {isLastSection ? (
+          <>
+            <button type="button" className="btn btn-secondary" onClick={handleGenerateReport}>
+              Generate Report
+            </button>
+            {!isSubmitted && (
+              <button type="button" className="btn btn-primary" onClick={handleSubmit} disabled={submitting}>
+                {submitting ? "Submitting..." : "Submit"}
+              </button>
+            )}
+          </>
+        ) : (
           <button type="button" className="btn btn-primary" onClick={handleSaveAndNext} disabled={savingDraft || loadingDraft}>
             {savingDraft ? "Saving..." : "Save & Next"}
           </button>
-        </div>
-      )}
+        )}
+      </div>
+      {isLastSection && submitStatus && <div style={styles.status}>{submitStatus}</div>}
     </form>
-  );
-}
-
-function SummaryPanel({ schema, values, tables, submitStatus, onGenerateReport, onSubmit, submitting }) {
-  const tableCount = Object.keys(tables).length;
-  const rowCount = Object.values(tables).reduce((count, rows) => count + rows.length, 0);
-  const filledFields = Object.values(values).filter((value) => String(value || "").trim()).length;
-
-  return (
-    <section style={styles.summaryPanel}>
-      <div style={styles.summaryGrid}>
-        <div style={styles.summaryCard}>
-          <strong style={styles.summaryValue}>{schema.sections.length}</strong>
-          <span>Sections</span>
-        </div>
-        <div style={styles.summaryCard}>
-          <strong style={styles.summaryValue}>{tableCount}</strong>
-          <span>Tables</span>
-        </div>
-        <div style={styles.summaryCard}>
-          <strong style={styles.summaryValue}>{rowCount}</strong>
-          <span>Rows</span>
-        </div>
-        <div style={styles.summaryCard}>
-          <strong style={styles.summaryValue}>{filledFields}</strong>
-          <span>Fields filled</span>
-        </div>
-      </div>
-
-      <div style={styles.summaryActions}>
-        <button type="button" className="btn btn-secondary" onClick={onGenerateReport}>
-          Generate Report
-        </button>
-        <button type="button" className="btn btn-primary" onClick={onSubmit} disabled={submitting}>
-          {submitting ? "Submitting..." : "Submit"}
-        </button>
-      </div>
-
-      {submitStatus && <div style={styles.status}>{submitStatus}</div>}
-    </section>
   );
 }
 
@@ -459,46 +428,10 @@ const styles = {
     flexDirection: "column",
     gap: 18,
   },
-  summaryPanel: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 16,
-    padding: 24,
-    border: "1px solid #e2e8f0",
-    borderRadius: 16,
-    background: "#fff",
-  },
-  summaryGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-    gap: 12,
-  },
-  summaryCard: {
-    border: "1px solid #e5eaf2",
-    borderRadius: 13,
-    background: "linear-gradient(145deg, #f8fafc, #ffffff)",
-    padding: "18px 20px",
-    display: "flex",
-    flexDirection: "column",
-    gap: 3,
-    color: "#64748b",
-    fontSize: 14,
-    fontWeight: 900,
-    textTransform: "uppercase",
-  },
-  summaryValue: {
-    color: "#0f172a",
-    fontSize: 18,
-    lineHeight: 1,
-  },
-  summaryActions: {
-    display: "flex",
-    justifyContent: "flex-end",
-    gap: 10,
-  },
   sectionFooter: {
     display: "flex",
     justifyContent: "flex-end",
+    gap: 10,
     marginTop: 16,
     padding: 0,
     border: 0,

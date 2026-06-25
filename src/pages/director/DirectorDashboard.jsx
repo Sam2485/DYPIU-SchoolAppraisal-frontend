@@ -30,7 +30,7 @@ export default function DirectorDashboard() {
         subtitle="D. Y. Patil International University"
         roleTitle="Academic Audit"
         roleText="Director of Schools"
-        items={[...academicAudit2025Schema.sections, { id: "summary", title: "Summary" }]}
+        items={academicAudit2025Schema.sections}
         activeId={activeSectionId}
         onChange={(sectionId) => {
           setReportMode(false);

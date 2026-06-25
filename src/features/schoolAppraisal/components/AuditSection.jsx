@@ -156,11 +156,9 @@ const styles = {
   subheading: {
     gridColumn: "1 / -1",
     margin: "8px 0 0",
-    padding: "10px 12px",
-    borderLeft: "4px solid #2563eb",
-    borderRadius: 10,
+    padding: 0,
     color: "#0f172a",
-    background: "#eff6ff",
+    background: "transparent",
     fontSize: 15,
     lineHeight: 1.35,
   },

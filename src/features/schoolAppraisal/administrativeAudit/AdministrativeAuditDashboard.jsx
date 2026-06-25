@@ -2,13 +2,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getApiErrorMessage } from "../../../api/client";
-import { buildSubmissionPayload, fetchMyDraft, normalizeDraft, saveDraft, submitDraft, uploadAttachment } from "../../../api/submissions";
+import { buildSubmissionPayload, fetchMyDraft, normalizeDraft, saveDraft, signOffProfileFromSession, submitDraft, uploadAttachment, withSubmitterSignOff } from "../../../api/submissions";
 import universityLogo from "../../../assets/images/image.png";
 import AuditTable from "../components/AuditTable";
 import { columnsWithSerial, serialColumnFor } from "../components/tableHelpers";
 import AdministrativeReportPanel from "./AdministrativeReportPanel";
 import AppSidebar from "../components/AppSidebar";
-import { administrativeAuditMeta, administrativeAuditModules, administrativeSummaryModule } from "./administrativeAuditConfig";
+import { administrativeAuditMeta, administrativeAuditModules } from "./administrativeAuditConfig";
 
 const emptyRowFor = (columns, index) => {
   const row = columnsWithSerial(columns).reduce((value, column) => {
@@ -81,14 +81,16 @@ export default function AdministrativeAuditDashboard() {
   const [savingDraft, setSavingDraft] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [hasExistingSubmission, setHasExistingSubmission] = useState(false);
+  const [isSubmitted, setIsSubmitted] = useState(false);
   const [data, setData] = useState(buildInitialData);
 
   const activeModule = useMemo(
-    () => administrativeAuditModules.find((module) => module.id === activeModuleId) || administrativeSummaryModule,
+    () => administrativeAuditModules.find((module) => module.id === activeModuleId) || administrativeAuditModules[0],
     [activeModuleId],
   );
   const profile = getUserProfile();
-  const isSummary = activeModuleId === administrativeSummaryModule.id;
+  const activeModuleIndex = administrativeAuditModules.findIndex((module) => module.id === activeModuleId);
+  const isLastModule = activeModuleIndex === administrativeAuditModules.length - 1;
 
   const handleModuleChange = (moduleId) => {
     setReportMode(false);
@@ -116,6 +118,7 @@ export default function AdministrativeAuditDashboard() {
           lastSavedAt: new Date().toISOString(),
         });
         setHasExistingSubmission(draft.exists);
+        setIsSubmitted(draft.isSubmitted);
       } catch (error) {
         if (isActive) setStatus(getApiErrorMessage(error, "Could not load your draft from the server."));
       } finally {
@@ -189,8 +192,11 @@ export default function AdministrativeAuditDashboard() {
   };
 
   const resetDraft = () => {
+    if (!window.confirm("Are you sure you want to reset the form? All unsaved changes will be lost.")) return;
+
     const nextData = buildInitialData();
     setData(nextData);
+    setIsSubmitted(false);
     setStatus("Form cleared.");
   };
 
@@ -213,7 +219,7 @@ export default function AdministrativeAuditDashboard() {
       setHasExistingSubmission(true);
       setStatus("Draft saved successfully.");
 
-      const moduleIds = [...administrativeAuditModules.map((module) => module.id), administrativeSummaryModule.id];
+      const moduleIds = administrativeAuditModules.map((module) => module.id);
       const currentIndex = moduleIds.indexOf(activeModuleId);
       const nextModuleId = moduleIds[Math.min(currentIndex + 1, moduleIds.length - 1)];
 
@@ -238,9 +244,20 @@ export default function AdministrativeAuditDashboard() {
     setSubmitStatus("");
 
     try {
-      await submitDraft(currentPayload(), { isUpdate: hasExistingSubmission });
+      const signedFields = withSubmitterSignOff(data.fields, signOffProfileFromSession("administrative"));
+      const signedData = { ...data, fields: signedFields };
+      await submitDraft(
+        buildSubmissionPayload({
+          auditType: "administrative",
+          values: signedFields,
+          tables: data.tables,
+          attachments: data.attachments,
+        }),
+        { isUpdate: hasExistingSubmission },
+      );
       setHasExistingSubmission(true);
-      setData((current) => ({ ...current, submittedAt: new Date().toISOString(), lastSavedAt: new Date().toISOString() }));
+      setIsSubmitted(true);
+      setData({ ...signedData, submittedAt: new Date().toISOString(), lastSavedAt: new Date().toISOString() });
       setSubmitStatus("Administrative Audit submitted successfully.");
     } catch (error) {
       setSubmitStatus(getApiErrorMessage(error, "Could not submit Administrative Audit."));
@@ -318,20 +335,7 @@ export default function AdministrativeAuditDashboard() {
               <span style={styles.badge}>Server draft</span>
             </div>
 
-            {isSummary ? (
-              <SummaryPanel
-                modules={administrativeAuditModules}
-                data={data}
-                submitStatus={submitStatus}
-                onGenerateReport={() => {
-                  setReportMode(true);
-                  setPrintReportAfterRender(true);
-                }}
-                onSubmit={handleSubmit}
-                submitting={submitting}
-              />
-            ) : (
-              moduleBlocksFor(activeModule).map((block, index) => {
+            {moduleBlocksFor(activeModule).map((block, index) => {
               if (block.type === "fields") {
                 return <FieldGrid key={`fields-${index}`} fields={block.fields} data={data} onChange={setFieldValue} />;
               }
@@ -367,16 +371,34 @@ export default function AdministrativeAuditDashboard() {
                   ))}
                 </div>
               );
-              })
-            )}
+            })}
 
-            {!isSummary && (
-              <div style={styles.sectionFooter}>
+            <div style={styles.sectionFooter}>
+              {isLastModule ? (
+                <>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => {
+                      setReportMode(true);
+                      setPrintReportAfterRender(true);
+                    }}
+                  >
+                    Generate Report
+                  </button>
+                  {!isSubmitted && (
+                    <button type="button" className="btn btn-primary" onClick={handleSubmit} disabled={submitting}>
+                      {submitting ? "Submitting..." : "Submit"}
+                    </button>
+                  )}
+                </>
+              ) : (
                 <button type="button" className="btn btn-primary" onClick={saveAndGoNext} disabled={savingDraft || loadingDraft}>
                   {savingDraft ? "Saving..." : "Save & Next"}
                 </button>
-              </div>
-            )}
+              )}
+            </div>
+            {isLastModule && submitStatus && <div style={styles.submitStatus}>{submitStatus}</div>}
           </section>
         </main>
 
@@ -424,7 +446,7 @@ function Sidebar({ activeModuleId, setActiveModuleId, profile, onLogout }) {
       badge="AA"
       roleTitle="Administrative Module"
       roleText="Registrar · HR · DSW · Placement"
-      items={[...administrativeAuditModules, administrativeSummaryModule]}
+      items={administrativeAuditModules}
       activeId={activeModuleId}
       onChange={setActiveModuleId}
       profile={profile}
@@ -480,45 +502,6 @@ function FieldGrid({ fields, data, onChange }) {
   );
 }
 
-function SummaryPanel({ modules, data, submitStatus, onGenerateReport, onSubmit, submitting }) {
-  const tableCount = modules.reduce((count, module) => count + moduleTablesFor(module).length, 0);
-  const rowCount = Object.values(data.tables).reduce((count, rows) => count + rows.length, 0);
-  const filledFields = Object.values(data.fields).filter((value) => String(value || "").trim()).length;
-
-  return (
-    <div style={styles.summaryPanel}>
-      <div style={styles.summaryGrid}>
-        <div style={styles.summaryCard}>
-          <strong style={styles.summaryValue}>{modules.length}</strong>
-          <span>Sections</span>
-        </div>
-        <div style={styles.summaryCard}>
-          <strong style={styles.summaryValue}>{tableCount}</strong>
-          <span>Tables</span>
-        </div>
-        <div style={styles.summaryCard}>
-          <strong style={styles.summaryValue}>{rowCount}</strong>
-          <span>Rows</span>
-        </div>
-        <div style={styles.summaryCard}>
-          <strong style={styles.summaryValue}>{filledFields}</strong>
-          <span>Fields filled</span>
-        </div>
-      </div>
-
-      <div style={styles.summaryActions}>
-        <button type="button" className="btn btn-secondary" onClick={onGenerateReport}>
-          Generate Report
-        </button>
-        <button type="button" className="btn btn-primary" onClick={onSubmit} disabled={submitting}>
-          {submitting ? "Submitting..." : "Submit"}
-        </button>
-      </div>
-
-      {submitStatus && <div style={styles.submitStatus}>{submitStatus}</div>}
-    </div>
-  );
-}
 
 function LogoutModal({ onCancel, onConfirm }) {
   return (
@@ -897,42 +880,10 @@ const styles = {
     flexDirection: "column",
     gap: 14,
   },
-  summaryPanel: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 16,
-  },
-  summaryGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-    gap: 12,
-  },
-  summaryCard: {
-    border: "1px solid #e5eaf2",
-    borderRadius: 13,
-    background: "linear-gradient(145deg, #f8fafc, #fff)",
-    padding: "18px 20px",
-    display: "flex",
-    flexDirection: "column",
-    gap: 3,
-    color: "#64748b",
-    fontSize: 14,
-    fontWeight: 900,
-    textTransform: "uppercase",
-  },
-  summaryValue: {
-    color: "#0f172a",
-    fontSize: 18,
-    lineHeight: 1,
-  },
-  summaryActions: {
-    display: "flex",
-    justifyContent: "flex-end",
-    gap: 10,
-  },
   sectionFooter: {
     display: "flex",
     justifyContent: "flex-end",
+    gap: 10,
     marginTop: 16,
     padding: 0,
     border: 0,

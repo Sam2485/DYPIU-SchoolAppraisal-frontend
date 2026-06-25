@@ -1,4 +1,5 @@
 import universityLogo from "../../../assets/images/image.png";
+import { SIGN_OFF_FIELD } from "../../../api/submissions";
 
 const moduleBlocksFor = (module) =>
   module.blocks || [
@@ -6,10 +7,10 @@ const moduleBlocksFor = (module) =>
     ...(module.tables?.length ? [{ type: "tables", tables: module.tables }] : []),
   ];
 
-export default function AdministrativeReportPanel({ meta, modules, data, onClose }) {
-  const filledFields = Object.values(data.fields).filter((value) => String(value || "").trim()).length;
-  const rowCount = Object.values(data.tables).reduce((count, rows) => count + rows.length, 0);
+const isOmittedReportText = (value) =>
+  String(value || "").trim().toLowerCase() === "reviewers (vc & iqac) cannot create or submit audits";
 
+export default function AdministrativeReportPanel({ meta, modules, data, onClose }) {
   return (
     <div className="generated-report" style={styles.panel}>
       <div className="generated-report__cover" style={styles.header}>
@@ -33,13 +34,6 @@ export default function AdministrativeReportPanel({ meta, modules, data, onClose
             Close
           </button>
         </div>
-      </div>
-
-      <div className="generated-report__stats" style={styles.statsGrid}>
-        <ReportStat value={modules.length} label="Sections" />
-        <ReportStat value={Object.keys(data.tables).length} label="Tables" />
-        <ReportStat value={rowCount} label="Data rows" />
-        <ReportStat value={filledFields} label="Fields completed" />
       </div>
 
       <div style={styles.body}>
@@ -67,7 +61,7 @@ export default function AdministrativeReportPanel({ meta, modules, data, onClose
               }
 
               return block.tables.map((table) => (
-                <div key={table.id} style={styles.tableBlock}>
+                <div className="generated-report__table-block" key={table.id} style={styles.tableBlock}>
                   <h4 className="generated-report__table-title" style={styles.tableTitle}>{table.title}</h4>
                   {!!table.notes?.length && (
                     <div style={styles.notes}>
@@ -105,45 +99,55 @@ export default function AdministrativeReportPanel({ meta, modules, data, onClose
             })}
           </section>
         ))}
-        <AuditorSignatureBlock />
+        <CertificationSignOff signOff={data.fields[SIGN_OFF_FIELD]} />
       </div>
     </div>
   );
 }
 
-function AuditorSignatureBlock() {
-  return (
-    <section className="generated-report__signatures" style={styles.signatureWrap}>
-      <h2 style={styles.signatureTitle}>Auditor verification</h2>
-      {[1, 2].map((auditor) => (
-        <div key={auditor} style={styles.signatureBlock}>
-          <div style={styles.signatureRow}>
-            <span>Name of the Auditor</span>
-            <span style={styles.signatureLine}>:</span>
-          </div>
-          <div style={styles.signatureRow}>
-            <span>Designation</span>
-            <span style={styles.signatureLine}>:</span>
-          </div>
-          <div style={styles.signatureRow}>
-            <span>Date</span>
-            <span style={styles.dateLine}>: &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;/&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;/20</span>
-          </div>
-        </div>
-      ))}
-    </section>
-  );
+function formatSignOffDate(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleDateString("en-IN");
 }
 
-function ReportStat({ value, label }) {
-  return <div className="generated-report__stat" style={styles.statCard}><strong style={styles.statValue}>{value}</strong><span style={styles.statLabel}>{label}</span></div>;
+function approverLabel(role = "") {
+  return String(role).includes("vice-chancellor") ? "Vice Chancellor" : String(role).includes("iqac") ? "IQAC Authority" : "Approving Authority";
+}
+
+function CertificationSignOff({ signOff = {} }) {
+  const submittedBy = signOff?.submittedBy || {};
+  const approvedBy = signOff?.approvedBy || {};
+
+  return (
+    <section className="generated-report__signatures" style={styles.signatureWrap}>
+      <div style={styles.signatureBlock}>
+        <h3 style={styles.signerTitle}>Form filled and submitted by</h3>
+        <div style={styles.signatureRow}><span>Name</span><strong>{submittedBy.name || "-"}</strong></div>
+        <div style={styles.signatureRow}><span>Designation</span><strong>{submittedBy.designation || "-"}</strong></div>
+        <div style={styles.signatureRow}><span>Date</span><strong>{formatSignOffDate(submittedBy.date)}</strong></div>
+      </div>
+      <div style={styles.signatureBlock}>
+        <h3 style={styles.signerTitle}>Approved by {approverLabel(approvedBy.role)}</h3>
+        {approvedBy.name ? (
+          <>
+            <div style={styles.signatureRow}><span>Name</span><strong>{approvedBy.name}</strong></div>
+            <div style={styles.signatureRow}><span>Designation</span><strong>{approvedBy.designation || "-"}</strong></div>
+            <div style={styles.signatureRow}><span>Date</span><strong>{formatSignOffDate(approvedBy.date)}</strong></div>
+          </>
+        ) : (
+          <div style={styles.pendingApproval}>Pending approval</div>
+        )}
+      </div>
+    </section>
+  );
 }
 
 function ReportFieldsTable({ fields, values }) {
   return (
     <table className="generated-report__detail-table" style={styles.detailsTable}>
       <tbody>
-        {fields.map((field) => field.kind === "heading" ? (
+        {fields.filter((field) => !isOmittedReportText(field.label) && !isOmittedReportText(values[field.id])).map((field) => field.kind === "heading" ? (
           <tr key={field.id}>
             <th className="generated-report__detail-heading" colSpan="2" style={styles.detailHeading}>{field.label}</th>
           </tr>
@@ -160,7 +164,7 @@ function ReportFieldsTable({ fields, values }) {
 
 function ReportCellValue({ value }) {
   if (!value) return "-";
-  if (typeof value !== "object") return String(value);
+  if (typeof value !== "object") return isOmittedReportText(value) ? "-" : String(value);
   const name = value.name || value.fileName || value.filename || "View attachment";
   const url = value.url || value.publicUrl || value.downloadUrl;
   return url ? <a className="generated-report__attachment" href={url} target="_blank" rel="noreferrer">{name}</a> : name;
@@ -237,10 +241,6 @@ const styles = {
   documentMeta: { display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 5, marginRight: 4 },
   documentBadge: { padding: "6px 10px", borderRadius: 999, color: "#1d4ed8", background: "#dbeafe", fontSize: 10, fontWeight: 800, letterSpacing: ".06em", textTransform: "uppercase" },
   generatedDate: { color: "#64748b", fontSize: 11 },
-  statsGrid: { display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 },
-  statCard: { display: "flex", alignItems: "baseline", gap: 8, padding: "12px 14px", border: "1px solid #dbe3ef", borderRadius: 10, background: "#fff" },
-  statValue: { color: "#1d4ed8", fontSize: 18 },
-  statLabel: { color: "#64748b", fontSize: 11, fontWeight: 700, textTransform: "uppercase" },
   body: {
     display: "flex",
     flexDirection: "column",
@@ -306,7 +306,7 @@ const styles = {
     whiteSpace: "pre-wrap",
   },
   tableBlock: {
-    marginTop: 14,
+    marginTop: 24,
   },
   tableTitle: {
     margin: "0 0 8px",
@@ -365,6 +365,8 @@ const styles = {
     fontSize: 14,
     fontWeight: 800,
   },
+  signerTitle: { margin: "0 0 12px", color: "#0f172a", fontSize: 14 },
+  pendingApproval: { padding: "18px 0", color: "#64748b", fontSize: 13, fontWeight: 700 },
   signatureRow: {
     display: "grid",
     gridTemplateColumns: "118px 1fr",
