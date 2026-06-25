@@ -140,7 +140,8 @@ export default function ReviewDashboard() {
   const [reviewingStatus, setReviewingStatus] = useState("");
   const [error, setError] = useState("");
   const [showLogoutModal, setShowLogoutModal] = useState(false);
-  const role = sessionStorage.getItem("role") || "iqac";
+  const role = String(sessionStorage.getItem("role") || "iqac").toLowerCase().replaceAll("_", "-");
+  const canManageUsers = role === "iqac";
   const roleConfig = REVIEW_ROLE_CONFIG[role] || REVIEW_ROLE_CONFIG.iqac;
   const profile = {
     name: sessionStorage.getItem("name") || roleConfig.roleTitle,
@@ -152,9 +153,10 @@ export default function ReviewDashboard() {
   const allSubmissions = useMemo(() => [...submissions.academic, ...submissions.administrative], [submissions]);
   const metrics = useMemo(() => buildMetrics(allSubmissions), [allSubmissions]);
   const navigationItems = useMemo(
-    () => role === "iqac" ? [...REVIEW_NAV_ITEMS, USER_MANAGEMENT_NAV_ITEM] : REVIEW_NAV_ITEMS,
-    [role],
+    () => canManageUsers ? [...REVIEW_NAV_ITEMS, USER_MANAGEMENT_NAV_ITEM] : REVIEW_NAV_ITEMS,
+    [canManageUsers],
   );
+  const visibleActiveView = !canManageUsers && activeView === "user-management" ? "overview" : activeView;
 
   useEffect(() => {
     let isActive = true;
@@ -278,8 +280,9 @@ export default function ReviewDashboard() {
           roleText={roleConfig.roleText}
           academicYear="2025-26"
           items={navigationItems}
-          activeId={activeView}
+          activeId={visibleActiveView}
           onChange={(viewId) => {
+            if (viewId === "user-management" && !canManageUsers) return;
             setSelectedSubmission(null);
             setActiveView(viewId);
           }}
@@ -312,7 +315,7 @@ export default function ReviewDashboard() {
               onSendBack={() => confirmStatusChange(selectedSubmission, "sent-back")}
               reviewingStatus={reviewingStatus}
             />
-          ) : activeView === "overview" ? (
+          ) : visibleActiveView === "overview" ? (
             <OverviewPanel
               metrics={metrics}
               submissions={allSubmissions}
@@ -322,16 +325,16 @@ export default function ReviewDashboard() {
                 openSubmission(submission);
               }}
             />
-          ) : activeView === "advanced-overview" ? (
+          ) : visibleActiveView === "advanced-overview" ? (
             <AdvancedOverviewPanel metrics={metrics} submissions={allSubmissions} loading={loadingSubmissions} />
-          ) : activeView === "user-management" && role === "iqac" ? (
+          ) : visibleActiveView === "user-management" && canManageUsers ? (
             <UserManagementPanel />
           ) : null}
 
           {error && <div className="review-error-notice" style={styles.errorNotice}>{error}</div>}
           {loadingSubmissionId && <div style={styles.emptyDraftNotice}>Loading submission details...</div>}
 
-          {!selectedSubmission && activeView === "academic" && (
+          {!selectedSubmission && visibleActiveView === "academic" && (
             <AuditReviewPanel
               auditType="academic"
               submissions={submissions.academic}
@@ -342,7 +345,7 @@ export default function ReviewDashboard() {
             />
           )}
 
-          {!selectedSubmission && activeView === "administrative" && (
+          {!selectedSubmission && visibleActiveView === "administrative" && (
             <AuditReviewPanel
               auditType="administrative"
               submissions={submissions.administrative}
