@@ -1393,23 +1393,37 @@ function ForwardAuditorModal({ submission, auditors, loading, selectedType, onTy
   return (
     <div style={styles.modalBackdrop} onClick={onCancel}>
       <div style={styles.forwardModal} onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="forward-auditor-title">
-        <div style={styles.modalHeader}>
-          <div>
-            <p style={styles.kicker}>Auditor review</p>
-            <h3 id="forward-auditor-title" style={styles.modalTitle}>Forward submission to auditor</h3>
-            <p style={styles.modalMeta}>
-              {auditLabels[submission.auditType]} - {assignmentLabel}
-            </p>
+        <div style={styles.forwardModalHeader}>
+          <div style={styles.forwardHeaderMain}>
+            <span style={styles.forwardHeaderIcon}>AU</span>
+            <div>
+              <p style={styles.kicker}>Auditor review</p>
+              <h3 id="forward-auditor-title" style={styles.forwardModalTitle}>Forward submission to auditor</h3>
+              <p style={styles.modalMeta}>
+                {auditLabels[submission.auditType]} - {assignmentLabel}
+              </p>
+            </div>
           </div>
-          <StatusBadge status={submission.status} />
+          <div style={styles.forwardHeaderActions}>
+            <StatusBadge status={submission.status} />
+            <button type="button" style={styles.iconCloseButton} onClick={onCancel} aria-label="Close auditor forwarding modal" disabled={Boolean(forwardingId)}>
+              ×
+            </button>
+          </div>
         </div>
 
         <div style={styles.forwardStep}>
-          <h4 style={styles.forwardStepTitle}>1. Choose auditor type</h4>
+          <div style={styles.forwardStepHeading}>
+            <span style={styles.forwardStepBadge}>1</span>
+            <div>
+              <h4 style={styles.forwardStepTitle}>Choose auditor type</h4>
+              <p style={styles.forwardStepHint}>The selected group will be matched against this submission assignment.</p>
+            </div>
+          </div>
           <div style={styles.forwardTypeRow}>
             {[
-              { value: "internal", label: "Internal" },
-              { value: "external", label: "External" },
+              { value: "internal", label: "Internal", detail: "Auditors from within the university" },
+              { value: "external", label: "External", detail: "Auditors from outside the university" },
             ].map((type) => (
               <button
                 key={type.value}
@@ -1417,18 +1431,33 @@ function ForwardAuditorModal({ submission, auditors, loading, selectedType, onTy
                 style={{ ...styles.forwardTypeButton, ...(selectedType === type.value ? styles.activeForwardTypeButton : {}) }}
                 onClick={() => onTypeChange(type.value)}
               >
-                {type.label}
+                <strong>{type.label}</strong>
+                <span>{type.detail}</span>
               </button>
             ))}
           </div>
         </div>
 
         <div style={styles.forwardStep}>
-          <h4 style={styles.forwardStepTitle}>2. Forward to matching auditor group</h4>
+          <div style={styles.forwardStepHeading}>
+            <span style={styles.forwardStepBadge}>2</span>
+            <div>
+              <h4 style={styles.forwardStepTitle}>Forward to matching auditor group</h4>
+              <p style={styles.forwardStepHint}>Only auditors assigned to the same {submission.auditType === "academic" ? "school" : "administrative post"} are shown.</p>
+            </div>
+          </div>
           {!selectedType ? (
-            <div style={styles.emptyDraftNotice}>Select Internal or External to view matching auditors.</div>
+            <div style={styles.forwardEmptyState}>
+              <span style={styles.forwardEmptyIcon}>1</span>
+              <strong>Select Internal or External</strong>
+              <small>Matching auditors will appear here after choosing the auditor type.</small>
+            </div>
           ) : loading ? (
-            <div style={styles.emptyDraftNotice}>Loading auditor accounts...</div>
+            <div style={styles.forwardEmptyState}>
+              <span style={styles.forwardEmptyIcon}>…</span>
+              <strong>Loading auditor accounts</strong>
+              <small>Please wait while the matching accounts are fetched.</small>
+            </div>
           ) : matchingAuditors.length ? (
             <>
               <div style={styles.forwardGroupSummary}>
@@ -1451,6 +1480,7 @@ function ForwardAuditorModal({ submission, auditors, loading, selectedType, onTy
               <button
                 type="button"
                 className="btn btn-primary"
+                style={styles.forwardPrimaryButton}
                 onClick={() => onForward(selectedType, matchingAuditors)}
                 disabled={Boolean(forwardingId)}
               >
@@ -1458,14 +1488,21 @@ function ForwardAuditorModal({ submission, auditors, loading, selectedType, onTy
               </button>
             </>
           ) : (
-            <div style={styles.errorNotice}>
-              No {selectedType} auditor is assigned for {assignmentLabel}. Create the auditor account from User Management with the same {submission.auditType === "academic" ? "school" : "administrative post"}.
+            <div style={styles.forwardErrorState}>
+              <span style={styles.forwardErrorIcon}>!</span>
+              <div>
+                <strong>No matching {selectedType} auditor found</strong>
+                <small>
+                  Create the auditor account from User Management with the same {submission.auditType === "academic" ? "school" : "administrative post"}: {assignmentLabel}.
+                </small>
+              </div>
             </div>
           )}
         </div>
 
-        <div style={styles.modalActions}>
-          <button type="button" onClick={onCancel} style={styles.cancelButton} disabled={Boolean(forwardingId)}>
+        <div style={styles.forwardFooter}>
+          <span>Forwarding keeps IQAC in control while auditors review assigned sections.</span>
+          <button type="button" onClick={onCancel} style={styles.forwardCancelButton} disabled={Boolean(forwardingId)}>
             Cancel
           </button>
         </div>
@@ -2044,10 +2081,12 @@ const styles = {
   modalBackdrop: {
     position: "fixed",
     inset: 0,
-    background: "rgba(15,23,42,0.55)",
+    background: "rgba(15, 23, 42, 0.62)",
+    backdropFilter: "blur(8px)",
     zIndex: 1000,
     display: "grid",
     placeItems: "center",
+    padding: 18,
   },
   modal: {
     width: "min(380px, 92vw)",
@@ -2057,16 +2096,73 @@ const styles = {
     boxShadow: "0 20px 60px rgba(0,0,0,0.25)",
   },
   forwardModal: {
-    width: "min(720px, 94vw)",
+    width: "min(860px, 94vw)",
     maxHeight: "90vh",
     overflowY: "auto",
-    background: "#fff",
-    borderRadius: 16,
-    padding: 22,
+    background: "linear-gradient(180deg, #ffffff 0%, #f8fbff 100%)",
+    border: "1px solid rgba(226, 232, 240, .9)",
+    borderRadius: 20,
+    padding: 0,
     display: "flex",
     flexDirection: "column",
+    gap: 0,
+    boxShadow: "0 30px 90px rgba(15, 23, 42, 0.36)",
+  },
+  forwardModalHeader: {
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
     gap: 18,
-    boxShadow: "0 24px 70px rgba(0,0,0,0.28)",
+    padding: "24px 28px 20px",
+    borderBottom: "1px solid #e2e8f0",
+    background: "linear-gradient(135deg, #ffffff 0%, #eff6ff 100%)",
+    borderRadius: "20px 20px 0 0",
+  },
+  forwardHeaderMain: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: 14,
+    minWidth: 0,
+  },
+  forwardHeaderIcon: {
+    width: 48,
+    height: 48,
+    flex: "0 0 48px",
+    display: "grid",
+    placeItems: "center",
+    borderRadius: 15,
+    color: "#fff",
+    background: "linear-gradient(135deg, #2563eb, #0ea5e9)",
+    fontSize: 12,
+    fontWeight: 950,
+    boxShadow: "0 14px 30px rgba(37, 99, 235, .28)",
+  },
+  forwardHeaderActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    flex: "0 0 auto",
+  },
+  forwardModalTitle: {
+    margin: "0 0 7px",
+    color: "#0f172a",
+    fontSize: 22,
+    lineHeight: 1.2,
+    fontWeight: 900,
+  },
+  iconCloseButton: {
+    width: 34,
+    height: 34,
+    display: "grid",
+    placeItems: "center",
+    border: "1px solid #dbe4f0",
+    borderRadius: 10,
+    color: "#475569",
+    background: "#fff",
+    cursor: "pointer",
+    fontSize: 22,
+    lineHeight: 1,
+    fontFamily: "inherit",
   },
   reviewModal: {
     width: "min(1040px, 96vw)",
@@ -2113,47 +2209,79 @@ const styles = {
   forwardStep: {
     display: "flex",
     flexDirection: "column",
-    gap: 10,
-    padding: 14,
+    gap: 14,
+    margin: "18px 28px 0",
+    padding: 18,
     border: "1px solid #e2e8f0",
-    borderRadius: 12,
-    background: "#fbfcfe",
+    borderRadius: 16,
+    background: "rgba(255, 255, 255, .86)",
+    boxShadow: "0 10px 28px rgba(15, 23, 42, .045)",
+  },
+  forwardStepHeading: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: 10,
+  },
+  forwardStepBadge: {
+    width: 28,
+    height: 28,
+    flex: "0 0 28px",
+    display: "grid",
+    placeItems: "center",
+    borderRadius: 9,
+    color: "#1d4ed8",
+    background: "#dbeafe",
+    fontSize: 12,
+    fontWeight: 950,
   },
   forwardStepTitle: {
     margin: 0,
     color: "#0f172a",
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: 850,
+  },
+  forwardStepHint: {
+    margin: "3px 0 0",
+    color: "#64748b",
+    fontSize: 12,
+    lineHeight: 1.4,
   },
   forwardTypeRow: {
     display: "grid",
     gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-    gap: 10,
+    gap: 12,
   },
   forwardTypeButton: {
-    minHeight: 44,
+    minHeight: 72,
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "center",
+    gap: 5,
+    padding: "12px 14px",
     border: "1px solid #d7dee9",
-    borderRadius: 9,
+    borderRadius: 12,
     color: "#334155",
     background: "#fff",
     cursor: "pointer",
     fontFamily: "inherit",
-    fontSize: 12.5,
-    fontWeight: 800,
+    fontSize: 12,
+    fontWeight: 700,
+    textAlign: "left",
+    transition: "border-color .15s ease, background .15s ease, box-shadow .15s ease, transform .15s ease",
   },
   activeForwardTypeButton: {
     borderColor: "#2563eb",
     color: "#1d4ed8",
     background: "#eff6ff",
-    boxShadow: "0 0 0 2px rgba(37,99,235,.1)",
+    boxShadow: "0 0 0 3px rgba(37,99,235,.11)",
   },
   forwardGroupSummary: {
     display: "flex",
     flexDirection: "column",
-    gap: 3,
-    padding: "10px 12px",
+    gap: 4,
+    padding: "12px 14px",
     border: "1px solid #bfdbfe",
-    borderRadius: 10,
+    borderRadius: 12,
     color: "#1e3a8a",
     background: "#eff6ff",
     fontSize: 12,
@@ -2167,14 +2295,15 @@ const styles = {
     display: "flex",
     alignItems: "center",
     gap: 12,
-    padding: 12,
+    padding: 13,
     border: "1px solid #dbe4f0",
-    borderRadius: 12,
+    borderRadius: 14,
     color: "#0f172a",
     background: "#fff",
     cursor: "default",
     fontFamily: "inherit",
     textAlign: "left",
+    boxShadow: "0 6px 16px rgba(15, 23, 42, .035)",
   },
   auditorAvatar: {
     width: 38,
@@ -2196,8 +2325,87 @@ const styles = {
     gap: 2,
   },
   auditorAssignText: {
-    color: "#1d4ed8",
+    padding: "5px 8px",
+    borderRadius: 999,
+    color: "#166534",
+    background: "#dcfce7",
     fontSize: 12,
+    fontWeight: 850,
+  },
+  forwardEmptyState: {
+    minHeight: 118,
+    display: "grid",
+    placeItems: "center",
+    gap: 5,
+    padding: 20,
+    border: "1px dashed #cbd5e1",
+    borderRadius: 14,
+    color: "#475569",
+    background: "#f8fafc",
+    textAlign: "center",
+    fontSize: 12.5,
+  },
+  forwardEmptyIcon: {
+    width: 34,
+    height: 34,
+    display: "grid",
+    placeItems: "center",
+    borderRadius: 12,
+    color: "#1d4ed8",
+    background: "#dbeafe",
+    fontSize: 13,
+    fontWeight: 950,
+  },
+  forwardErrorState: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: 12,
+    padding: 16,
+    border: "1px solid #fecaca",
+    borderRadius: 14,
+    color: "#991b1b",
+    background: "#fff1f2",
+    fontSize: 13,
+    lineHeight: 1.5,
+  },
+  forwardErrorIcon: {
+    width: 30,
+    height: 30,
+    flex: "0 0 30px",
+    display: "grid",
+    placeItems: "center",
+    borderRadius: 10,
+    color: "#fff",
+    background: "#dc2626",
+    fontSize: 14,
+    fontWeight: 950,
+  },
+  forwardPrimaryButton: {
+    width: "100%",
+    minHeight: 46,
+    borderRadius: 12,
+  },
+  forwardFooter: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 14,
+    marginTop: 18,
+    padding: "16px 28px 24px",
+    color: "#64748b",
+    fontSize: 12,
+    fontWeight: 650,
+  },
+  forwardCancelButton: {
+    minWidth: 118,
+    border: "1px solid #dbe4f0",
+    borderRadius: 12,
+    padding: "11px 16px",
+    color: "#334155",
+    background: "#f8fafc",
+    cursor: "pointer",
+    fontFamily: "inherit",
+    fontSize: 13,
     fontWeight: 850,
   },
   formViewer: {
