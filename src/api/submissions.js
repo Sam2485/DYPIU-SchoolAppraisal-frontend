@@ -142,7 +142,7 @@ export const normalizeDraft = (payload = {}, fallbackValues = {}, fallbackTables
       draft.status,
     ),
     status,
-    isSubmitted: Boolean(values[SIGN_OFF_FIELD]?.submittedBy?.date) || Boolean(status && status !== "draft"),
+    isSubmitted: Boolean(status && !["draft", "sent-back"].includes(status)),
     values,
     tables: {
       ...fallbackTables,
