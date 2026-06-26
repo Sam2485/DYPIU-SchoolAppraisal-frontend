@@ -4,10 +4,15 @@ import AuditForm from "../../features/schoolAppraisal/components/AuditForm";
 import AppSidebar from "../../features/schoolAppraisal/components/AppSidebar";
 import { academicAudit2025Schema } from "../../features/schoolAppraisal/formSchemas";
 
+const directorAuditSchema = {
+  ...academicAudit2025Schema,
+  sections: academicAudit2025Schema.sections.filter((section) => section.id !== "part-e-observations"),
+};
+
 export default function DirectorDashboard() {
   const navigate = useNavigate();
   const [showLogoutModal, setShowLogoutModal] = useState(false);
-  const [activeSectionId, setActiveSectionId] = useState(academicAudit2025Schema.sections[0].id);
+  const [activeSectionId, setActiveSectionId] = useState(directorAuditSchema.sections[0].id);
   const [reportMode, setReportMode] = useState(false);
   const profile = {
     name: sessionStorage.getItem("name") || "Director of Schools",
@@ -30,7 +35,7 @@ export default function DirectorDashboard() {
         subtitle="D. Y. Patil International University"
         roleTitle="Academic Audit"
         roleText="Director of Schools"
-        items={academicAudit2025Schema.sections}
+        items={directorAuditSchema.sections}
         activeId={activeSectionId}
         onChange={(sectionId) => {
           setReportMode(false);
@@ -43,7 +48,7 @@ export default function DirectorDashboard() {
 
       <main className="academic-audit-main" style={styles.page}>
         <AuditForm
-          schema={academicAudit2025Schema}
+          schema={directorAuditSchema}
           activeSectionId={activeSectionId}
           reportMode={reportMode}
           onReportModeChange={setReportMode}

@@ -96,6 +96,7 @@ function approverLabel(role = "") {
 
 function CertificationSignOff({ signOff = {} }) {
   const submittedBy = signOff?.submittedBy || {};
+  const auditedBy = signOff?.auditedBy || signOff?.auditorBy || {};
   const approvedBy = signOff?.approvedBy || {};
 
   return (
@@ -105,6 +106,18 @@ function CertificationSignOff({ signOff = {} }) {
         <div style={styles.signatureRow}><span>Name</span><strong>{submittedBy.name || "-"}</strong></div>
         <div style={styles.signatureRow}><span>Designation</span><strong>{submittedBy.designation || "-"}</strong></div>
         <div style={styles.signatureRow}><span>Date</span><strong>{formatSignOffDate(submittedBy.date)}</strong></div>
+      </div>
+      <div style={styles.signatureBlock}>
+        <h3 style={styles.signerTitle}>Auditor remarks filled by</h3>
+        {auditedBy.name ? (
+          <>
+            <div style={styles.signatureRow}><span>Name</span><strong>{auditedBy.name}</strong></div>
+            <div style={styles.signatureRow}><span>Designation</span><strong>{auditedBy.designation || "-"}</strong></div>
+            <div style={styles.signatureRow}><span>Date</span><strong>{formatSignOffDate(auditedBy.date)}</strong></div>
+          </>
+        ) : (
+          <div style={styles.pendingApproval}>Pending auditor remarks</div>
+        )}
       </div>
       <div style={styles.signatureBlock}>
         <h3 style={styles.signerTitle}>Approved by {approverLabel(approvedBy.role)}</h3>
@@ -288,7 +301,7 @@ const styles = {
   },
   signatureWrap: {
     display: "grid",
-    gridTemplateColumns: "repeat(2, minmax(260px, 1fr))",
+    gridTemplateColumns: "repeat(3, minmax(220px, 1fr))",
     gap: 28,
     padding: "28px 36px",
     border: "1px solid #dbe3ef",

@@ -51,11 +51,17 @@ export default function Login() {
       }
 
       sessionStorage.setItem("token", profile.token);
+      sessionStorage.setItem("userId", profile.id);
       sessionStorage.setItem("email", profile.email || email);
       sessionStorage.setItem("username", profile.email || email);
       sessionStorage.setItem("name", profile.name);
       sessionStorage.setItem("designation", profile.designation);
       sessionStorage.setItem("school", profile.school);
+      sessionStorage.setItem("post", profile.post);
+      sessionStorage.setItem("accountType", profile.accountType);
+      sessionStorage.setItem("category", profile.category);
+      sessionStorage.setItem("auditorType", profile.auditorType);
+      sessionStorage.setItem("auditorRole", profile.auditorRole);
       sessionStorage.setItem("role", profile.role);
       navigate(dashboardForRole(profile.role), { replace: true });
     } catch (loginError) {

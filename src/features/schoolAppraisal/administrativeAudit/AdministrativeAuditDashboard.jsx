@@ -10,6 +10,8 @@ import AdministrativeReportPanel from "./AdministrativeReportPanel";
 import AppSidebar from "../components/AppSidebar";
 import { administrativeAuditMeta, administrativeAuditModules } from "./administrativeAuditConfig";
 
+const administrativeUserModules = administrativeAuditModules.filter((module) => module.id !== "section-f-observations-recommendations");
+
 const emptyRowFor = (columns, index) => {
   const row = columnsWithSerial(columns).reduce((value, column) => {
     value[column] = "";
@@ -71,7 +73,7 @@ const getUserProfile = () => ({
 
 export default function AdministrativeAuditDashboard() {
   const navigate = useNavigate();
-  const [activeModuleId, setActiveModuleId] = useState(administrativeAuditModules[0].id);
+  const [activeModuleId, setActiveModuleId] = useState(administrativeUserModules[0].id);
   const [reportMode, setReportMode] = useState(false);
   const [printReportAfterRender, setPrintReportAfterRender] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
@@ -85,12 +87,12 @@ export default function AdministrativeAuditDashboard() {
   const [data, setData] = useState(buildInitialData);
 
   const activeModule = useMemo(
-    () => administrativeAuditModules.find((module) => module.id === activeModuleId) || administrativeAuditModules[0],
+    () => administrativeUserModules.find((module) => module.id === activeModuleId) || administrativeUserModules[0],
     [activeModuleId],
   );
   const profile = getUserProfile();
-  const activeModuleIndex = administrativeAuditModules.findIndex((module) => module.id === activeModuleId);
-  const isLastModule = activeModuleIndex === administrativeAuditModules.length - 1;
+  const activeModuleIndex = administrativeUserModules.findIndex((module) => module.id === activeModuleId);
+  const isLastModule = activeModuleIndex === administrativeUserModules.length - 1;
 
   const handleModuleChange = (moduleId) => {
     setReportMode(false);
@@ -219,7 +221,7 @@ export default function AdministrativeAuditDashboard() {
       setHasExistingSubmission(true);
       setStatus("Draft saved successfully.");
 
-      const moduleIds = administrativeAuditModules.map((module) => module.id);
+      const moduleIds = administrativeUserModules.map((module) => module.id);
       const currentIndex = moduleIds.indexOf(activeModuleId);
       const nextModuleId = moduleIds[Math.min(currentIndex + 1, moduleIds.length - 1)];
 
@@ -280,7 +282,7 @@ export default function AdministrativeAuditDashboard() {
           <main className="admin-audit-main" style={styles.main}>
             <AdministrativeReportPanel
               meta={administrativeAuditMeta}
-              modules={administrativeAuditModules}
+              modules={administrativeUserModules}
               data={data}
               onClose={() => setReportMode(false)}
             />
@@ -454,7 +456,7 @@ function Sidebar({ activeModuleId, setActiveModuleId, profile, onLogout }) {
       badge="AA"
       roleTitle="Administrative Module"
       roleText="Registrar · HR · DSW · Placement"
-      items={administrativeAuditModules}
+      items={administrativeUserModules}
       activeId={activeModuleId}
       onChange={setActiveModuleId}
       profile={profile}

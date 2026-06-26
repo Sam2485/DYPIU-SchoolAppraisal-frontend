@@ -76,6 +76,8 @@ export const getSubmissionSignOff = (submission = {}, values = {}) => {
 
 export const dashboardForRole = (role) => {
   const normalizedRole = normalizeRole(role);
+  if (normalizedRole.includes("auditor")) return "/auditor/dashboard";
+
   const dashboards = {
     director: "/director/dashboard",
     administrative: "/administrative/dashboard",
@@ -89,14 +91,33 @@ export const dashboardForRole = (role) => {
 export const normalizeUserProfile = (payload = {}) => {
   const user = payload.user || payload.profile || payload.data?.user || payload.data || payload;
   const token = payload.token || payload.jwt || payload.accessToken || payload.data?.token || payload.data?.jwt || "";
+  const rawRole = normalizeRole(user.role || payload.role || "");
+  const accountType = normalizeRole(user.accountType || user.userType || user.type || payload.accountType || (rawRole.includes("auditor") ? "auditor" : ""));
+  const category = normalizeRole(user.category || user.auditCategory || payload.category || payload.auditCategory || (
+    rawRole.includes("administrative") ? "administrative" : rawRole.includes("academic") ? "academic" : ""
+  ));
+  const auditorType = normalizeRole(user.auditorType || user.auditorCategory || payload.auditorType || payload.auditorCategory || (
+    rawRole.includes("external") ? "external" : rawRole.includes("internal") ? "internal" : ""
+  ));
+  const auditorRole = normalizeRole(
+    user.auditorRole ||
+    payload.auditorRole ||
+    (accountType === "auditor" ? [category, auditorType, "auditor"].filter(Boolean).join("-") : rawRole),
+  );
 
   return {
     token,
+    id: user.id || user.userId || payload.id || payload.userId || "",
     email: user.email || user.username || payload.email || payload.username || "",
     name: user.name || user.fullName || payload.name || "",
     designation: user.designation || payload.designation || "",
     school: user.school || user.schoolName || payload.school || "",
-    role: normalizeRole(user.role || payload.role || ""),
+    post: user.post || payload.post || "",
+    accountType,
+    category,
+    auditorType,
+    auditorRole,
+    role: accountType === "auditor" ? auditorRole : rawRole,
   };
 };
 

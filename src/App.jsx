@@ -2,14 +2,18 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import Login from "./pages/auth/Login";
 import ResetPassword from "./pages/auth/ResetPassword";
 import AdministrativeDashboard from "./pages/administrative/AdministrativeDashboard";
+import AuditorDashboard from "./pages/auditor/AuditorDashboard";
 import DirectorDashboard from "./pages/director/DirectorDashboard";
 import ReviewDashboardPage from "./pages/review/ReviewDashboardPage";
 
 function ProtectedRoute({ role, children }) {
   const activeRole = sessionStorage.getItem("role");
   const allowedRoles = Array.isArray(role) ? role : [role];
+  const hasAccess = allowedRoles.some((allowedRole) =>
+    allowedRole === activeRole || (allowedRole === "auditor" && String(activeRole || "").includes("auditor"))
+  );
 
-  if (!allowedRoles.includes(activeRole)) {
+  if (!hasAccess) {
     return <Navigate to="/login" replace state={{ message: "Please sign in with the appropriate account to continue." }} />;
   }
 
@@ -37,6 +41,10 @@ export default function App() {
         <Route
           path="/iqac/dashboard"
           element={<ProtectedRoute role="iqac"><ReviewDashboardPage /></ProtectedRoute>}
+        />
+        <Route
+          path="/auditor/dashboard"
+          element={<ProtectedRoute role="auditor"><AuditorDashboard /></ProtectedRoute>}
         />
         <Route
           path="/review/dashboard"

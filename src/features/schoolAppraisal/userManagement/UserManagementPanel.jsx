@@ -67,12 +67,12 @@ const normalizeUser = (user = {}, index = 0) => {
 
 const postLabelFor = (value) => ADMINISTRATIVE_POSTS.find((post) => post.value === value)?.label || value;
 const titleCase = (value = "") => String(value).replaceAll("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+const auditorRoleForForm = (form) => `${form.category}-${form.auditorType}-auditor`;
 const roleForForm = (form) => form.accountType === "auditor"
-  ? (form.category === "academic" ? "director" : "administrative")
+  ? auditorRoleForForm(form)
   : form.category === "academic"
     ? "director"
     : "administrative";
-const auditorRoleForForm = (form) => `${form.category}-${form.auditorType}-auditor`;
 const designationForForm = (form) => {
   if (form.accountType === "auditor") return `${titleCase(form.auditorType)} ${titleCase(form.category)} Auditor`;
   return form.category === "academic" ? "Director" : postLabelFor(form.post);
