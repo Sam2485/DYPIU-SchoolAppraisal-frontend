@@ -1,7 +1,7 @@
 //renders a section of the audit form, like part A, part B, etc. It can contain fields and tables
 import AuditTable from "./AuditTable";
 
-function FieldGrid({ fields, values, onFieldChange }) {
+function FieldGrid({ fields, values, onFieldChange, readOnly = false }) {
   return (
     <div className="audit-field-grid" style={styles.fieldGrid}>
       {fields.map((field) => {
@@ -23,6 +23,7 @@ function FieldGrid({ fields, values, onFieldChange }) {
                 className="audit-control"
                 style={styles.textarea}
                 rows={4}
+                readOnly={readOnly}
               />
             ) : field.type === "select" ? (
               <select
@@ -30,6 +31,7 @@ function FieldGrid({ fields, values, onFieldChange }) {
                 onChange={(event) => onFieldChange(field.id, event.target.value)}
                 className="audit-control"
                 style={styles.input}
+                disabled={readOnly}
               >
                 <option value="">Select</option>
                 {field.options.map((option) => (
@@ -45,6 +47,7 @@ function FieldGrid({ fields, values, onFieldChange }) {
                 className="audit-control"
                 style={styles.input}
                 type={field.type || "text"}
+                readOnly={readOnly}
               />
             )}
           </label>
@@ -54,7 +57,7 @@ function FieldGrid({ fields, values, onFieldChange }) {
   );
 }
 
-function TableList({ tableDefinitions, tableValues, values, onFieldChange, onTableChange, onAddRow, onDeleteLastRow, onUploadAttachment, onDeleteAttachment }) {
+function TableList({ tableDefinitions, tableValues, values, onFieldChange, onTableChange, onAddRow, onDeleteLastRow, onUploadAttachment, onDeleteAttachment, readOnly = false }) {
   return (
     <div style={styles.tables}>
       {tableDefinitions.map((table) => (
@@ -69,13 +72,14 @@ function TableList({ tableDefinitions, tableValues, values, onFieldChange, onTab
           onDeleteLastRow={onDeleteLastRow}
           onUploadAttachment={onUploadAttachment}
           onDeleteAttachment={onDeleteAttachment}
+          readOnly={readOnly}
         />
       ))}
     </div>
   );
 }
 
-export default function AuditSection({ section, values, tables, onFieldChange, onTableChange, onAddRow, onDeleteLastRow, onUploadAttachment, onDeleteAttachment }) {
+export default function AuditSection({ section, values, tables, onFieldChange, onTableChange, onAddRow, onDeleteLastRow, onUploadAttachment, onDeleteAttachment, readOnly = false }) {
   const blocks = section.blocks || [
     ...(section.fields?.length ? [{ type: "fields", fields: section.fields }] : []),
     ...(section.tables?.length ? [{ type: "tables", tables: section.tables }] : []),
@@ -89,7 +93,7 @@ export default function AuditSection({ section, values, tables, onFieldChange, o
 
       {blocks.map((block, index) => {
         if (block.type === "fields") {
-          return <FieldGrid key={`fields-${index}`} fields={block.fields} values={values} onFieldChange={onFieldChange} />;
+          return <FieldGrid key={`fields-${index}`} fields={block.fields} values={values} onFieldChange={onFieldChange} readOnly={readOnly} />;
         }
 
         return (
@@ -104,6 +108,7 @@ export default function AuditSection({ section, values, tables, onFieldChange, o
             onDeleteLastRow={onDeleteLastRow}
             onUploadAttachment={onUploadAttachment}
             onDeleteAttachment={onDeleteAttachment}
+            readOnly={readOnly}
           />
         );
       })}

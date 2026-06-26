@@ -78,6 +78,7 @@ export default function AuditForm({ schema, activeSectionId, reportMode, onRepor
   const [printReportAfterRender, setPrintReportAfterRender] = useState(false);
   const activeSectionIndex = Math.max(0, schema.sections.findIndex((section) => section.id === activeSectionId));
   const isLastSection = activeSectionIndex === schema.sections.length - 1;
+  const readOnly = isSubmitted;
   const progress = Math.round(((activeSectionIndex + 1) / schema.sections.length) * 100);
 
   useEffect(() => {
@@ -258,10 +259,10 @@ export default function AuditForm({ schema, activeSectionId, reportMode, onRepor
           </div>
         </div>
         <div style={styles.actions}>
-          <button type="button" className="btn btn-secondary" onClick={handleClear}>
+          <button type="button" className="btn btn-secondary" onClick={handleClear} disabled={readOnly}>
             Clear
           </button>
-          <button type="button" className="btn btn-primary" onClick={handleSaveDraft} disabled={savingDraft || loadingDraft}>
+          <button type="button" className="btn btn-primary" onClick={handleSaveDraft} disabled={readOnly || savingDraft || loadingDraft}>
             {savingDraft ? "Saving..." : "Save Draft"}
           </button>
         </div>
@@ -295,6 +296,7 @@ export default function AuditForm({ schema, activeSectionId, reportMode, onRepor
                 await deleteAttachment(attachment);
                 setAttachments((current) => current.filter((file) => file.url !== attachment.url));
               }}
+              readOnly={readOnly}
             />
           ))}
       </div>
@@ -312,7 +314,7 @@ export default function AuditForm({ schema, activeSectionId, reportMode, onRepor
             )}
           </>
         ) : (
-          <button type="button" className="btn btn-primary" onClick={handleSaveAndNext} disabled={savingDraft || loadingDraft}>
+          <button type="button" className="btn btn-primary" onClick={handleSaveAndNext} disabled={readOnly || savingDraft || loadingDraft}>
             {savingDraft ? "Saving..." : "Save & Next"}
           </button>
         )}

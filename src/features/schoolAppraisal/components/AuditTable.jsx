@@ -16,6 +16,7 @@ export default function AuditTable({
   onDeleteLastRow,
   onUploadAttachment,
   onDeleteAttachment,
+  readOnly = false,
 }) {
   const columns = columnsWithSerial(table.columns);
   const fitToContainer = table.fitToContainer !== false;
@@ -35,6 +36,7 @@ export default function AuditTable({
 
   const handleAttachmentChange = async (rowIndex, column, selectedFiles) => {
     const files = Array.from(selectedFiles || []);
+    if (readOnly) return;
     if (!files.length) return;
 
     setUploadError("");
@@ -70,6 +72,8 @@ export default function AuditTable({
   };
 
   const handleAttachmentDelete = async (rowIndex, column, attachment) => {
+    if (readOnly) return;
+
     if (!attachment?.url) {
       setUploadError("Could not delete attachment because its URL is missing.");
       return;
@@ -138,6 +142,7 @@ export default function AuditTable({
                 className="audit-control"
                 style={styles.embeddedInput}
                 type={field.type || "text"}
+                readOnly={readOnly}
               />
             </label>
           ))}
@@ -200,7 +205,7 @@ export default function AuditTable({
                                       type="button"
                                       style={styles.deleteAttachmentButton}
                                       onClick={() => handleAttachmentDelete(rowIndex, column, file)}
-                                      disabled={deletingAttachment === `${rowIndex}-${column}-${file.url}`}
+                                      disabled={readOnly || deletingAttachment === `${rowIndex}-${column}-${file.url}`}
                                       aria-label={`Remove ${file.name || "attachment"}`}
                                     >
                                       {deletingAttachment === `${rowIndex}-${column}-${file.url}` ? "Removing..." : "Remove"}
@@ -222,7 +227,7 @@ export default function AuditTable({
                                   }}
                                   style={styles.fileInput}
                                   aria-label={`Add attachments to ${table.title} ${column}`}
-                                  disabled={uploadingCell === `${rowIndex}-${column}`}
+                                  disabled={readOnly || uploadingCell === `${rowIndex}-${column}`}
                                 />
                               </label>
                             </span>
@@ -254,7 +259,7 @@ export default function AuditTable({
                               }}
                               style={styles.fileInput}
                               aria-label={`${table.title} ${column}`}
-                              disabled={uploadingCell === `${rowIndex}-${column}`}
+                              disabled={readOnly || uploadingCell === `${rowIndex}-${column}`}
                             />
                           </label>
                         )}
@@ -269,7 +274,7 @@ export default function AuditTable({
                           ...(serialColumnFor([column]) ? styles.serialInput : {}),
                           background: serialColumnFor([column]) ? "#f8fafc" : "#fff",
                         }}
-                        readOnly={Boolean(serialColumnFor([column]))}
+                        readOnly={readOnly || Boolean(serialColumnFor([column]))}
                         aria-label={`${table.title} ${column}`}
                       />
                     )}
@@ -289,10 +294,10 @@ export default function AuditTable({
       </div>
 
       <div style={styles.footer}>
-        <button type="button" className="audit-table-add-row" onClick={() => onAddRow?.(table)}>
+        <button type="button" className="audit-table-add-row" onClick={() => onAddRow?.(table)} disabled={readOnly}>
           + Add Row
         </button>
-        <button type="button" className="audit-table-delete-row" onClick={() => onDeleteLastRow?.(table)} disabled={rows.length <= 1}>
+        <button type="button" className="audit-table-delete-row" onClick={() => onDeleteLastRow?.(table)} disabled={readOnly || rows.length <= 1}>
           Delete Last Row
         </button>
       </div>

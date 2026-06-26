@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { getApiErrorMessage } from "../../../api/client";
 import { createUser, deleteUser, fetchUsers, updateUser } from "../../../api/users";
-import { ADMINISTRATIVE_POSTS, SCHOOL_OPTIONS } from "./userManagementConfig";
+import { ADMINISTRATIVE_POSTS, SCHOOL_OPTIONS, canonicalSchoolCode } from "./userManagementConfig";
 
 const emptyForm = {
   accountType: "user",
@@ -85,7 +85,7 @@ function validate(form) {
   const errors = {};
   if (!form.category) errors.category = "Select Academic or Administrative.";
   if (form.accountType === "auditor" && !form.auditorType) errors.auditorType = "Select Internal or External auditor.";
-  if (form.category === "academic" && !form.school) errors.school = "Select a school.";
+  if (form.category === "academic" && !canonicalSchoolCode(form.school)) errors.school = "Select a valid school.";
   if (form.category === "administrative" && !form.post) errors.post = "Select an administrative post.";
   if (!form.name.trim()) errors.name = "Enter the user's name.";
   if (!form.email.trim()) errors.email = "Enter an email address.";
@@ -101,7 +101,7 @@ function validateEdit(form) {
   const errors = {};
   if (!form.category) errors.category = "Select Academic or Administrative.";
   if (form.accountType === "auditor" && !form.auditorType) errors.auditorType = "Select Internal or External auditor.";
-  if (form.category === "academic" && !form.school) errors.school = "Select a school.";
+  if (form.category === "academic" && !canonicalSchoolCode(form.school)) errors.school = "Select a valid school.";
   if (form.category === "administrative" && !form.post) errors.post = "Select an administrative post.";
   if (!form.name.trim()) errors.name = "Enter the user's name.";
   if (!form.email.trim()) errors.email = "Enter an email address.";
@@ -121,7 +121,7 @@ const editFormFromUser = (user = {}) => {
     accountType: user.accountType === "auditor" ? "auditor" : "user",
     category,
     auditorType: user.accountType === "auditor" ? (user.auditorType || "internal") : "",
-    school: category === "academic" ? (user.school || user.schoolName || user.assignment || "") : "",
+    school: category === "academic" ? canonicalSchoolCode(user.school || user.schoolName || user.assignment) : "",
     post: category === "administrative" ? postValue : "",
     name: user.name === "-" ? "" : user.name || "",
     email: user.email === "-" ? "" : user.email || "",
@@ -226,7 +226,7 @@ export default function UserManagementPanel() {
       auditorType: form.accountType === "auditor" ? form.auditorType : null,
       auditorRole: form.accountType === "auditor" ? auditorRoleForForm(form) : null,
       role: roleForForm(form),
-      school: isAcademic ? form.school : "Administrative Office",
+      school: isAcademic ? canonicalSchoolCode(form.school) : "Administrative Office",
       designation: designationForForm(form),
       post: isAcademic ? null : form.post,
       name: form.name.trim(),
@@ -317,7 +317,7 @@ export default function UserManagementPanel() {
       auditorType: editForm.accountType === "auditor" ? editForm.auditorType : null,
       auditorRole: editForm.accountType === "auditor" ? auditorRoleForForm(editForm) : null,
       role: roleForForm(editForm),
-      school: isAcademic ? editForm.school : "Administrative Office",
+      school: isAcademic ? canonicalSchoolCode(editForm.school) : "Administrative Office",
       designation: designationForForm(editForm),
       post: isAcademic ? null : editForm.post,
       name: editForm.name.trim(),
@@ -414,7 +414,7 @@ export default function UserManagementPanel() {
                   <select className="audit-control" style={styles.control} value={form.school} onChange={(event) => updateField("school", event.target.value)}>
                     <option value="">Select school</option>
                     {schools.map((school) => (
-                      <option key={school.name} value={school.name}>
+                      <option key={school.name} value={school.code.toUpperCase()}>
                         {school.name}{school.code ? ` (${school.code})` : ""}
                       </option>
                     ))}
@@ -645,7 +645,7 @@ export default function UserManagementPanel() {
                   <select className="audit-control" style={styles.control} value={editForm.school} onChange={(event) => updateEditField("school", event.target.value)}>
                     <option value="">Select school</option>
                     {schools.map((school) => (
-                      <option key={school.name} value={school.name}>
+                      <option key={school.name} value={school.code.toUpperCase()}>
                         {school.name}{school.code ? ` (${school.code})` : ""}
                       </option>
                     ))}

@@ -9,6 +9,19 @@ export const SCHOOL_OPTIONS = [
   { name: "School of Applied Arts", code: "SoAA" },
 ];
 
+const normalizeSchoolValue = (value = "") =>
+  String(value).trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+
+export const canonicalSchoolCode = (value = "") => {
+  const normalized = normalizeSchoolValue(value);
+  const school = SCHOOL_OPTIONS.find((option) =>
+    normalizeSchoolValue(option.code) === normalized ||
+    normalizeSchoolValue(option.name) === normalized
+  );
+
+  return school?.code.toUpperCase() || "";
+};
+
 export const ADMINISTRATIVE_POSTS = [
   { value: "registrar", label: "Registrar" },
   { value: "hr", label: "HR" },

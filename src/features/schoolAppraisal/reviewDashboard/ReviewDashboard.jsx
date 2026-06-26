@@ -122,8 +122,7 @@ const withAuditorSignOff = (values = {}, profile = {}, auditedAt = new Date().to
 });
 const getAuditorSignOff = (values = {}) => values[SIGN_OFF_FIELD]?.auditedBy || values[SIGN_OFF_FIELD]?.auditorBy || {};
 const isAuditorCompleted = (submission = {}) =>
-  ["auditor-completed", "approved"].includes(submission.status) ||
-  Boolean(submission.auditorReviewedOn || getAuditorSignOff(submission.values).date);
+  ["auditor-completed", "approved"].includes(submission.status);
 const responseList = (payload) => {
   const data = payload?.data ?? payload;
   if (Array.isArray(data)) return data;
@@ -272,7 +271,7 @@ const matchesAuditorSession = (submission, profile) => {
 
 const submissionVisibleForRole = (submission, role, profile) => {
   if (role === "iqac") return true;
-  if (role === "vice-chancellor") return isAuditorCompleted(submission);
+  if (role === "vice-chancellor") return ["auditor-completed", "approved"].includes(submission.status);
   if (isAuditorRole(role)) return matchesAuditorSession(submission, profile);
   return false;
 };
@@ -418,6 +417,10 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
         ...submission,
         ...submissionPayload(detailData),
       });
+      if (!submissionVisibleForRole(detailedSubmission, role, profile)) {
+        setError("This submission is no longer available for your role.");
+        return;
+      }
       setSelectedSubmission(detailedSubmission);
     } catch (openError) {
       setError(getApiErrorMessage(openError, "Could not load submission details."));
@@ -444,12 +447,6 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
       await reviewSubmission(submission.id, {
         status: backendStatusFor(status),
         remarks: submission.remarks,
-        ...(status === "approved" ? {
-          reviewedBy: profile.name,
-          reviewedByDesignation: profile.designation,
-          reviewedByRole: role,
-          reviewedOn,
-        } : {}),
       });
 
       updateSubmission(submission.auditType, submission.id, {
@@ -502,26 +499,29 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
 
     setForwardingId(auditorType);
     setError("");
-    const auditorIds = matchingAuditors.map((auditor) => auditor.id).filter(Boolean);
+    const auditorIds = matchingAuditors
+      .map((auditor) => Number(auditor.id))
+      .filter((id) => Number.isSafeInteger(id) && id > 0);
+    if (!auditorIds.length) {
+      setError("Matching auditor accounts must have valid numeric IDs before forwarding.");
+      setForwardingId("");
+      return;
+    }
     const auditorNames = matchingAuditors.map((auditor) => auditor.name).filter(Boolean);
     const auditorEmails = matchingAuditors.map((auditor) => auditor.email).filter(Boolean);
     const groupLabel = `${auditorNames.length} ${auditorType} ${forwardTarget.auditType} auditor${auditorNames.length === 1 ? "" : "s"}`;
 
     const payload = {
       status: backendStatusFor("under-review"),
-      forwardedToAuditorId: "",
-      forwardedToAuditorName: groupLabel,
-      forwardedToAuditorEmail: "",
       forwardedToAuditorIds: auditorIds,
       forwardedToAuditorNames: auditorNames,
       forwardedToAuditorEmails: auditorEmails,
       forwardedAuditorType: auditorType,
-      forwardedAuditCategory: forwardTarget.auditType,
-      forwardedAt: new Date().toISOString(),
     };
 
     try {
       await updateSubmissionById(forwardTarget.id, payload);
+      const forwardedAt = new Date().toISOString();
       updateSubmission(forwardTarget.auditType, forwardTarget.id, {
         status: "under-review",
         forwardedToAuditorId: "",
@@ -532,7 +532,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
         forwardedToAuditorEmails: auditorEmails,
         forwardedAuditorType: auditorType,
         forwardedAuditCategory: forwardTarget.auditType,
-        forwardedAt: payload.forwardedAt,
+        forwardedAt,
       });
       closeForwardModal();
     } catch (forwardError) {
@@ -551,29 +551,20 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
     try {
       const auditorReviewedOn = new Date().toISOString();
       const signedValues = withAuditorSignOff(values, profile, auditorReviewedOn);
-      const payload = {
-        ...buildSubmissionPayload({
+      const { valuesData, tablesData, attachments } = buildSubmissionPayload({
           auditType: submission.auditType,
           values: signedValues,
           tables: submission.tables,
           attachments: submission.attachments,
-        }),
+        });
+      const payload = {
         status: backendStatusFor("auditor-completed"),
-        auditorReviewedBy: profile.name,
-        auditorReviewedByDesignation: profile.designation,
-        auditorReviewedByRole: role,
-        auditorReviewedOn,
+        valuesData,
+        tablesData,
+        attachments,
       };
 
-      try {
-        await updateSubmissionById(submission.id, payload);
-      } catch (updateError) {
-        if (updateError?.response?.status !== 400) throw updateError;
-        await updateSubmissionById(submission.id, {
-          ...payload,
-          status: backendStatusFor("under-review"),
-        });
-      }
+      await updateSubmissionById(submission.id, payload);
       updateSubmission(submission.auditType, submission.id, {
         status: "auditor-completed",
         values: signedValues,

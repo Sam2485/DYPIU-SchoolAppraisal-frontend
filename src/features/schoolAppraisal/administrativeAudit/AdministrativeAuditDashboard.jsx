@@ -93,6 +93,7 @@ export default function AdministrativeAuditDashboard() {
   const profile = getUserProfile();
   const activeModuleIndex = administrativeUserModules.findIndex((module) => module.id === activeModuleId);
   const isLastModule = activeModuleIndex === administrativeUserModules.length - 1;
+  const readOnly = isSubmitted;
 
   const handleModuleChange = (moduleId) => {
     setReportMode(false);
@@ -317,7 +318,7 @@ export default function AdministrativeAuditDashboard() {
               </div>
             </div>
             <div className="admin-audit-actions" style={styles.headerActions}>
-              <button type="button" className="btn btn-secondary" onClick={resetDraft} disabled={loadingDraft || savingDraft}>
+              <button type="button" className="btn btn-secondary" onClick={resetDraft} disabled={readOnly || loadingDraft || savingDraft}>
                 Reset
               </button>
             </div>
@@ -339,7 +340,7 @@ export default function AdministrativeAuditDashboard() {
 
             {moduleBlocksFor(activeModule).map((block, index) => {
               if (block.type === "fields") {
-                return <FieldGrid key={`fields-${index}`} fields={block.fields} data={data} onChange={setFieldValue} />;
+                return <FieldGrid key={`fields-${index}`} fields={block.fields} data={data} onChange={setFieldValue} readOnly={readOnly} />;
               }
 
               if (block.type === "text") {
@@ -377,6 +378,7 @@ export default function AdministrativeAuditDashboard() {
                       lastSavedAt: new Date().toISOString(),
                     }));
                   }}
+                  readOnly={readOnly}
                 />
                   ))}
                 </div>
@@ -403,7 +405,7 @@ export default function AdministrativeAuditDashboard() {
                   )}
                 </>
               ) : (
-                <button type="button" className="btn btn-primary" onClick={saveAndGoNext} disabled={savingDraft || loadingDraft}>
+                <button type="button" className="btn btn-primary" onClick={saveAndGoNext} disabled={readOnly || savingDraft || loadingDraft}>
                   {savingDraft ? "Saving..." : "Save & Next"}
                 </button>
               )}
@@ -465,7 +467,7 @@ function Sidebar({ activeModuleId, setActiveModuleId, profile, onLogout }) {
   );
 }
 
-function FieldGrid({ fields, data, onChange }) {
+function FieldGrid({ fields, data, onChange, readOnly = false }) {
   return (
     <div className="audit-field-grid" style={styles.fieldGrid}>
       {fields.map((field) => {
@@ -495,6 +497,7 @@ function FieldGrid({ fields, data, onChange }) {
                 className="audit-control"
                 style={styles.textarea}
                 rows={4}
+                readOnly={readOnly}
               />
             ) : (
               <input
@@ -503,6 +506,7 @@ function FieldGrid({ fields, data, onChange }) {
                 className="audit-control"
                 style={styles.input}
                 type="text"
+                readOnly={readOnly}
               />
             )}
           </label>
