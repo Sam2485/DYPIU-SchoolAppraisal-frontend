@@ -187,11 +187,22 @@ const withAuditorSignOff = (values = {}, profile = {}, auditedAt = new Date().to
       name: profile.name,
       designation: profile.designation,
       role: profile.role,
+      email: profile.email,
       date: auditedAt,
     },
   },
 });
 const getAuditorSignOff = (values = {}) => values[SIGN_OFF_FIELD]?.auditedBy || values[SIGN_OFF_FIELD]?.auditorBy || {};
+const getSubmissionAuditorSignOff = (submission = {}) => {
+  const storedSignOff = getAuditorSignOff(submission.values);
+  return {
+    name: storedSignOff.name || submission.auditorReviewedBy || "",
+    designation: storedSignOff.designation || submission.auditorReviewedByDesignation || "",
+    role: storedSignOff.role || submission.auditorReviewedByRole || "",
+    email: storedSignOff.email || submission.auditorReviewedByEmail || "",
+    date: storedSignOff.date || submission.auditorReviewedOn || "",
+  };
+};
 const isApprovedReport = (submission = {}) => submission.status === "approved";
 const isAuditorCompleted = (submission = {}) =>
   ["auditor-completed", "approved"].includes(submission.status) ||
@@ -385,6 +396,7 @@ const normalizeSubmission = (submission = {}) => {
     auditorReviewedBy: auditorSignOff.name || submission.auditorReviewedBy || submission.auditedBy || "",
     auditorReviewedByDesignation: auditorSignOff.designation || submission.auditorReviewedByDesignation || submission.auditorDesignation || "",
     auditorReviewedByRole: auditorSignOff.role || submission.auditorReviewedByRole || submission.auditorRole || "",
+    auditorReviewedByEmail: auditorSignOff.email || submission.auditorReviewedByEmail || submission.auditorEmail || "",
     auditorReviewedOn: auditorSignOff.date || submission.auditorReviewedOn || submission.auditedOn || "",
     reportCategory: normalizeUserRole(
       submission.reportCategory ||
@@ -1494,6 +1506,20 @@ function FullFormReview({
   const handleAuditorFieldChange = (fieldId, value) => {
     setDraftValues((current) => ({ ...current, [fieldId]: value }));
   };
+  const previousInternalReport = (submission.versionHistory || [])
+    .filter((entry) =>
+      (
+        String(entry.reportCategory || "").toLowerCase() === "internal" ||
+        (
+          String(submission.reportCategory || "").toLowerCase() === "external" &&
+          Number(entry.version || 0) < Number(submission.version || 0)
+        )
+      ) &&
+      getSubmissionAuditorSignOff(entry).name
+    )
+    .sort((first, second) => Number(second.version || 0) - Number(first.version || 0))[0];
+  const previousInternalAuditor = getSubmissionAuditorSignOff(previousInternalReport);
+  const currentAuditor = getSubmissionAuditorSignOff(submission);
 
   if (reportMode) {
     return (
@@ -1504,13 +1530,24 @@ function FullFormReview({
               <button type="button" className="btn btn-secondary" onClick={() => setReportMode(false)}>Close Report</button>
               <button type="button" className="btn btn-primary" onClick={() => window.print()}>Print Report</button>
             </div>
-            <AuditReportPanel schema={academicAudit2025Schema} values={submission.values} tables={submission.tables} />
+            <AuditReportPanel
+              schema={academicAudit2025Schema}
+              values={submission.values}
+              tables={submission.tables}
+              submissionSchool={submission.school}
+              reportCategory={submission.reportCategory}
+              currentAuditor={currentAuditor}
+              previousInternalAuditor={previousInternalAuditor}
+            />
           </>
         ) : (
           <AdministrativeReportPanel
             meta={administrativeAuditMeta}
             modules={administrativeAuditModules}
             data={{ fields: submission.values, tables: submission.tables }}
+            reportCategory={submission.reportCategory}
+            currentAuditor={currentAuditor}
+            previousInternalAuditor={previousInternalAuditor}
             onClose={() => setReportMode(false)}
           />
         )}

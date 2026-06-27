@@ -11,7 +11,15 @@ const moduleBlocksFor = (module) =>
 const isOmittedReportText = (value) =>
   String(value || "").trim().toLowerCase() === "reviewers (vc & iqac) cannot create or submit audits";
 
-export default function AdministrativeReportPanel({ meta, modules, data, onClose }) {
+export default function AdministrativeReportPanel({
+  meta,
+  modules,
+  data,
+  onClose,
+  reportCategory = "",
+  currentAuditor = {},
+  previousInternalAuditor = {},
+}) {
   return (
     <div className="generated-report" style={styles.panel}>
       <div className="generated-report__cover" style={styles.header}>
@@ -100,7 +108,12 @@ export default function AdministrativeReportPanel({ meta, modules, data, onClose
             })}
           </section>
         ))}
-        <CertificationSignOff signOff={data.fields[SIGN_OFF_FIELD]} />
+        <CertificationSignOff
+          signOff={data.fields[SIGN_OFF_FIELD]}
+          reportCategory={reportCategory}
+          currentAuditor={currentAuditor}
+          previousInternalAuditor={previousInternalAuditor}
+        />
       </div>
     </div>
   );
@@ -114,10 +127,32 @@ function approverLabel(role = "") {
   return String(role).includes("vice-chancellor") ? "Vice Chancellor" : String(role).includes("iqac") ? "IQAC Authority" : "Approving Authority";
 }
 
-function CertificationSignOff({ signOff = {} }) {
+function SignerDetails({ signer = {}, pendingText }) {
+  if (!signer.name) return <div style={styles.pendingApproval}>{pendingText}</div>;
+
+  return (
+    <>
+      <div style={styles.signatureRow}><span>Name</span><strong>{signer.name}</strong></div>
+      <div style={styles.signatureRow}><span>Designation</span><strong>{signer.designation || "-"}</strong></div>
+      {signer.role && <div style={styles.signatureRow}><span>Role</span><strong>{signer.role}</strong></div>}
+      {signer.email && <div style={styles.signatureRow}><span>Email</span><strong>{signer.email}</strong></div>}
+      <div style={styles.signatureRow}><span>Date</span><strong>{formatSignOffDate(signer.date)}</strong></div>
+    </>
+  );
+}
+
+function CertificationSignOff({
+  signOff = {},
+  reportCategory = "",
+  currentAuditor = {},
+  previousInternalAuditor = {},
+}) {
   const submittedBy = signOff?.submittedBy || {};
-  const auditedBy = signOff?.auditedBy || signOff?.auditorBy || {};
+  const storedAuditor = signOff?.auditedBy || signOff?.auditorBy || {};
   const approvedBy = signOff?.approvedBy || {};
+  const activeAuditor = currentAuditor.name ? currentAuditor : storedAuditor;
+  const isExternalReport = String(reportCategory).toLowerCase() === "external";
+  const internalAuditor = isExternalReport ? previousInternalAuditor : activeAuditor;
 
   return (
     <section className="generated-report__signatures" style={styles.signatureWrap}>
@@ -128,28 +163,18 @@ function CertificationSignOff({ signOff = {} }) {
         <div style={styles.signatureRow}><span>Date</span><strong>{formatSignOffDate(submittedBy.date)}</strong></div>
       </div>
       <div style={styles.signatureBlock}>
-        <h3 style={styles.signerTitle}>Auditor remarks filled by</h3>
-        {auditedBy.name ? (
-          <>
-            <div style={styles.signatureRow}><span>Name</span><strong>{auditedBy.name}</strong></div>
-            <div style={styles.signatureRow}><span>Designation</span><strong>{auditedBy.designation || "-"}</strong></div>
-            <div style={styles.signatureRow}><span>Date</span><strong>{formatSignOffDate(auditedBy.date)}</strong></div>
-          </>
-        ) : (
-          <div style={styles.pendingApproval}>Pending auditor remarks</div>
-        )}
+        <h3 style={styles.signerTitle}>Internal Auditor remarks filled by</h3>
+        <SignerDetails signer={internalAuditor} pendingText="Pending internal auditor remarks" />
       </div>
+      {isExternalReport && (
+        <div style={styles.signatureBlock}>
+          <h3 style={styles.signerTitle}>External Auditor remarks filled by</h3>
+          <SignerDetails signer={activeAuditor} pendingText="Pending external auditor remarks" />
+        </div>
+      )}
       <div style={styles.signatureBlock}>
         <h3 style={styles.signerTitle}>Approved by {approverLabel(approvedBy.role)}</h3>
-        {approvedBy.name ? (
-          <>
-            <div style={styles.signatureRow}><span>Name</span><strong>{approvedBy.name}</strong></div>
-            <div style={styles.signatureRow}><span>Designation</span><strong>{approvedBy.designation || "-"}</strong></div>
-            <div style={styles.signatureRow}><span>Date</span><strong>{formatSignOffDate(approvedBy.date)}</strong></div>
-          </>
-        ) : (
-          <div style={styles.pendingApproval}>Pending approval</div>
-        )}
+        <SignerDetails signer={approvedBy} pendingText="Pending approval" />
       </div>
     </section>
   );
@@ -366,7 +391,7 @@ const styles = {
   },
   signatureWrap: {
     display: "grid",
-    gridTemplateColumns: "repeat(3, minmax(220px, 1fr))",
+    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
     gap: 28,
     padding: "28px 36px",
     border: "1px solid #dbe3ef",

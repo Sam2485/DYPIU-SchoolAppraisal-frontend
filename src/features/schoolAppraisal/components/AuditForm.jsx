@@ -238,7 +238,12 @@ export default function AuditForm({ schema, academicYear = schema.academicYear, 
             Print Report
           </button>
         </div>
-        <AuditReportPanel schema={{ ...schema, academicYear }} values={values} tables={tables} />
+        <AuditReportPanel
+          schema={{ ...schema, academicYear }}
+          values={values}
+          tables={tables}
+          submissionSchool={sessionStorage.getItem("school") || values.schoolName || ""}
+        />
       </div>
     );
   }
