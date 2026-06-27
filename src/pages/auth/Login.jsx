@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { getApiErrorMessage } from "../../api/client";
 import { login, requestPasswordReset } from "../../api/auth";
 import { dashboardForRole, normalizeUserProfile } from "../../api/submissions";
+import { InlineSpinner } from "../../features/schoolAppraisal/components/LoadingState";
 import backgroundImage from "../../assets/images/dyp.jpeg";
 import iqacLogo from "../../assets/images/IQAS.png";
 import universityLogo from "../../assets/images/image.png";
@@ -250,7 +251,8 @@ export default function Login() {
 
             <div style={{ marginBottom: 16 }} />
 
-            <button className="dyp-btn" type="button" onClick={handleLogin} disabled={loading}>
+            <button className="dyp-btn" type="button" onClick={handleLogin} disabled={loading} aria-busy={loading}>
+              {loading && <InlineSpinner label="Signing in" />}
               {loading ? "Signing in..." : "Login"}
             </button>
 
@@ -259,7 +261,9 @@ export default function Login() {
               type="button"
               onClick={handleForgotPassword}
               disabled={resetLoading}
+              aria-busy={resetLoading}
             >
+              {resetLoading && <InlineSpinner label="Sending reset link" />}
               {resetLoading ? "Sending reset link..." : "Forgot password?"}
             </button>
           </div>

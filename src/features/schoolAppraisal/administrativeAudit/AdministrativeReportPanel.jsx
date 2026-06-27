@@ -1,5 +1,6 @@
 import universityLogo from "../../../assets/images/image.png";
 import { SIGN_OFF_FIELD } from "../../../api/submissions";
+import { formatDateDDMMYYYY } from "../../../utils/dateFormat";
 
 const moduleBlocksFor = (module) =>
   module.blocks || [
@@ -27,7 +28,7 @@ export default function AdministrativeReportPanel({ meta, modules, data, onClose
         <div className="admin-report-actions" style={styles.actions}>
           <div style={styles.documentMeta}>
             <span style={styles.documentBadge}>Generated Report</span>
-            <span style={styles.generatedDate}>Prepared {new Date().toLocaleDateString("en-IN")}</span>
+            <span style={styles.generatedDate}>Prepared {formatDateDDMMYYYY(new Date())}</span>
           </div>
           <button type="button" className="btn btn-primary" onClick={() => window.print()}>Print</button>
           <button type="button" style={styles.secondary} onClick={onClose}>
@@ -106,9 +107,7 @@ export default function AdministrativeReportPanel({ meta, modules, data, onClose
 }
 
 function formatSignOffDate(value) {
-  if (!value) return "-";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleDateString("en-IN");
+  return formatDateDDMMYYYY(value);
 }
 
 function approverLabel(role = "") {

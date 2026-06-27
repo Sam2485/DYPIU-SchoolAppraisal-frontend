@@ -22,12 +22,13 @@ export default function AppSidebar({
   roleText,
   academicYear = "2025-26",
   items,
+  standaloneItems = [],
   activeId,
   onChange,
   profile,
   onLogout,
 }) {
-  const activeItem = items.find((item) => item.id === activeId) || items[0];
+  const activeItem = items.find((item) => item.id === activeId);
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef(null);
 
@@ -99,8 +100,8 @@ export default function AppSidebar({
               {activeItem?.id === "overview" || activeItem?.id === "summary" ? <SummaryIcon /> : <ClipboardIcon />}
             </span>
             <span className="app-sidebar__select-copy">
-              <small>{activeItem?.number ? `Section ${activeItem.number}` : "Overview"}</small>
-              <strong>{activeItem?.title}</strong>
+              <small>{activeItem?.number ? `Section ${activeItem.number}` : activeItem ? "Overview" : "Appraisal form"}</small>
+              <strong>{activeItem?.title || "Browse sections"}</strong>
             </span>
             <span className="app-sidebar__chevron"><ChevronIcon /></span>
           </button>
@@ -131,6 +132,30 @@ export default function AppSidebar({
           )}
         </div>
         <span className="app-sidebar__nav-hint">Jump to any section at any time</span>
+
+        {standaloneItems.length > 0 && (
+          <div className="app-sidebar__nav-list" aria-label="Review actions">
+            {standaloneItems.map((item) => {
+              const selected = item.id === activeId;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={`app-sidebar__nav-item${selected ? " is-active" : ""}`}
+                  onClick={() => selectSection(item.id)}
+                  aria-current={selected ? "page" : undefined}
+                >
+                  <span className="app-sidebar__nav-icon"><ClipboardIcon /></span>
+                  <span className="app-sidebar__nav-text">
+                    <small>Final verification</small>
+                    <strong>{item.title}</strong>
+                  </span>
+                  {selected && <span className="app-sidebar__active-dot" />}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </nav>
 
       <a className="app-sidebar__support" href="mailto:appraisal@dypiu.ac.in">

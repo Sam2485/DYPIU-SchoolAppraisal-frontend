@@ -4,6 +4,7 @@ import { resetPassword } from "../../api/auth";
 import { getApiErrorMessage } from "../../api/client";
 import backgroundImage from "../../assets/images/dyp.jpeg";
 import iqacLogo from "../../assets/images/IQAS.png";
+import { InlineSpinner } from "../../features/schoolAppraisal/components/LoadingState";
 import universityLogo from "../../assets/images/image.png";
 
 export default function ResetPassword() {
@@ -169,7 +170,8 @@ export default function ResetPassword() {
               disabled={!token || loading}
             />
 
-            <button className="dyp-btn" type="button" onClick={handleSubmit} disabled={!token || loading}>
+            <button className="dyp-btn" type="button" onClick={handleSubmit} disabled={!token || loading} aria-busy={loading}>
+              {loading && <InlineSpinner label="Resetting password" />}
               {loading ? "Resetting password..." : "Reset Password"}
             </button>
 

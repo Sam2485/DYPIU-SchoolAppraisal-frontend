@@ -1,6 +1,7 @@
 import { columnsWithSerial } from "./tableHelpers";
 import universityLogo from "../../../assets/images/image.png";
 import { SIGN_OFF_FIELD } from "../../../api/submissions";
+import { formatDateDDMMYYYY } from "../../../utils/dateFormat";
 
 const blocksFor = (section) =>
   section.blocks || [
@@ -25,7 +26,7 @@ export default function AuditReportPanel({ schema, values, tables }) {
         </div>
         <div style={styles.documentMeta}>
           <span style={styles.documentBadge}>Generated Report</span>
-          <span style={styles.generatedDate}>Prepared {new Date().toLocaleDateString("en-IN")}</span>
+          <span style={styles.generatedDate}>Prepared {formatDateDDMMYYYY(new Date())}</span>
         </div>
       </header>
 
@@ -85,9 +86,7 @@ export default function AuditReportPanel({ schema, values, tables }) {
 }
 
 function formatSignOffDate(value) {
-  if (!value) return "-";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleDateString("en-IN");
+  return formatDateDDMMYYYY(value);
 }
 
 function approverLabel(role = "") {

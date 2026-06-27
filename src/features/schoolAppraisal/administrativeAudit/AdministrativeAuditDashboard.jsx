@@ -5,6 +5,8 @@ import { getApiErrorMessage } from "../../../api/client";
 import { buildSubmissionPayload, deleteAttachment, fetchMyDraft, normalizeDraft, saveDraft, signOffProfileFromSession, submitDraft, uploadAttachments, withSubmitterSignOff } from "../../../api/submissions";
 import universityLogo from "../../../assets/images/image.png";
 import AuditTable from "../components/AuditTable";
+import DateInput from "../components/DateInput";
+import { InlineSpinner, LoadingState, SkeletonList } from "../components/LoadingState";
 import { columnsWithSerial, serialColumnFor } from "../components/tableHelpers";
 import AdministrativeReportPanel from "./AdministrativeReportPanel";
 import AppSidebar from "../components/AppSidebar";
@@ -325,9 +327,11 @@ export default function AdministrativeAuditDashboard() {
           </header>
 
           {status && <div style={styles.submitStatus}>{status}</div>}
-          {loadingDraft && <div style={styles.submitStatus}>Loading draft from server...</div>}
+          {loadingDraft && <LoadingState label="Loading saved form..." compact />}
 
-          <section className="admin-form-panel audit-section-card" style={styles.modulePanel}>
+          {loadingDraft ? (
+            <SkeletonList rows={3} />
+          ) : <section className="admin-form-panel audit-section-card" style={styles.modulePanel}>
             <div style={styles.moduleHead}>
               <div>
                 <h2 style={styles.moduleTitle}>
@@ -399,19 +403,21 @@ export default function AdministrativeAuditDashboard() {
                     Generate Report
                   </button>
                   {!isSubmitted && (
-                    <button type="button" className="btn btn-primary" onClick={handleSubmit} disabled={submitting}>
+                    <button type="button" className="btn btn-primary" onClick={handleSubmit} disabled={submitting} aria-busy={submitting}>
+                      {submitting && <InlineSpinner label="Submitting form" />}
                       {submitting ? "Submitting..." : "Submit"}
                     </button>
                   )}
                 </>
               ) : (
-                <button type="button" className="btn btn-primary" onClick={saveAndGoNext} disabled={readOnly || savingDraft || loadingDraft}>
+                <button type="button" className="btn btn-primary" onClick={saveAndGoNext} disabled={readOnly || savingDraft || loadingDraft} aria-busy={savingDraft}>
+                  {savingDraft && <InlineSpinner label="Saving section" />}
                   {savingDraft ? "Saving..." : "Save & Next"}
                 </button>
               )}
             </div>
             {isLastModule && submitStatus && <div style={styles.submitStatus}>{submitStatus}</div>}
-          </section>
+          </section>}
         </main>
 
         {showLogoutModal && <LogoutModal onCancel={() => setShowLogoutModal(false)} onConfirm={handleLogout} />}
@@ -497,6 +503,14 @@ function FieldGrid({ fields, data, onChange, readOnly = false }) {
                 className="audit-control"
                 style={styles.textarea}
                 rows={4}
+                readOnly={readOnly}
+              />
+            ) : field.type === "date" ? (
+              <DateInput
+                value={data.fields[field.id] ?? ""}
+                onChange={(value) => onChange(field.id, value)}
+                className="audit-control"
+                style={styles.input}
                 readOnly={readOnly}
               />
             ) : (

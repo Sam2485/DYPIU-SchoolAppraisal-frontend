@@ -2,8 +2,10 @@
 import { useState } from "react";
 import { getApiErrorMessage } from "../../../api/client";
 import { columnsWithSerial, serialColumnFor } from "./tableHelpers";
+import DateInput from "./DateInput";
 
 const isAttachmentColumn = (column) => /\b(link|proof|attachment|document|mom)\b/i.test(column);
+const isDateColumn = (column) => /^\s*date\s*$/i.test(column);
 
 export default function AuditTable({
   table,
@@ -176,61 +178,68 @@ export default function AuditTable({
                         {(Array.isArray(row[column]) ? row[column] : row[column] ? [row[column]] : []).length ? (
                           <div className="audit-attached-file" style={styles.attachedFile}>
                             {(Array.isArray(row[column]) ? row[column] : [row[column]]).map((file, fileIndex) => (
-                              <span key={`${file.url || file.name || "attachment"}-${fileIndex}`} style={styles.fileSummary}>
-                                <span style={styles.pdfIcon} aria-hidden="true">
-                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                                    <path d="M6 2.75h8l4 4V21.25H6z" />
-                                    <path d="M14 2.75v4h4" />
-                                  </svg>
-                                </span>
-                                <span style={styles.fileDetails}>
-                                  <span style={styles.fileName} title={file.name || file.fileName}>
-                                    {file.name || file.fileName || "Attached document"}
+                              <article className="audit-attachment-card" key={`${file.url || file.name || "attachment"}-${fileIndex}`} style={styles.fileSummary}>
+                                <div style={styles.fileHeader}>
+                                  <span style={styles.pdfIcon} aria-hidden="true">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" style={{ width: 18, height: 18 }}>
+                                      <path d="M6 2.75h8l4 4V21.25H6z" />
+                                      <path d="M14 2.75v4h4" />
+                                    </svg>
                                   </span>
-                                  <span style={styles.fileType}>PDF document</span>
-                                </span>
+                                  <span style={styles.fileDetails}>
+                                    <span style={styles.fileName} title={file.name || file.fileName}>
+                                      {file.name || file.fileName || "Attached document"}
+                                    </span>
+                                    <span style={styles.fileType}>PDF document</span>
+                                  </span>
+                                </div>
                                 {file.url && (
-                                  <span style={styles.attachmentItemActions}>
+                                  <div style={styles.attachmentItemActions}>
                                     <a
                                       className="audit-attachment-view"
                                       href={file.url}
                                       target="_blank"
                                       rel="noreferrer"
                                       style={styles.attachmentLink}
-                                      aria-label={`View ${file.name || "attachment"}`}
+                                      aria-label={`Open ${file.name || "attachment"}`}
+                                      title="Open document"
                                     >
-                                      View
+                                      Open
                                     </a>
-                                    <button
-                                      type="button"
-                                      style={styles.deleteAttachmentButton}
-                                      onClick={() => handleAttachmentDelete(rowIndex, column, file)}
-                                      disabled={readOnly || deletingAttachment === `${rowIndex}-${column}-${file.url}`}
-                                      aria-label={`Remove ${file.name || "attachment"}`}
-                                    >
-                                      {deletingAttachment === `${rowIndex}-${column}-${file.url}` ? "Removing..." : "Remove"}
-                                    </button>
-                                  </span>
+                                    {!readOnly && (
+                                      <button
+                                        type="button"
+                                        style={styles.deleteAttachmentButton}
+                                        onClick={() => handleAttachmentDelete(rowIndex, column, file)}
+                                        disabled={deletingAttachment === `${rowIndex}-${column}-${file.url}`}
+                                        aria-label={`Remove ${file.name || "attachment"}`}
+                                      >
+                                        {deletingAttachment === `${rowIndex}-${column}-${file.url}` ? "Removing..." : "Remove"}
+                                      </button>
+                                    )}
+                                  </div>
                                 )}
-                              </span>
+                              </article>
                             ))}
-                            <span style={styles.fileActions}>
-                              <label className="audit-attachment-replace" style={styles.replaceButton}>
-                                {uploadingCell === `${rowIndex}-${column}` ? "Uploading..." : "Add PDFs"}
-                                <input
-                                  type="file"
-                                  accept=".pdf,application/pdf"
-                                  multiple
-                                  onChange={(event) => {
-                                    handleAttachmentChange(rowIndex, column, event.target.files);
-                                    event.target.value = "";
-                                  }}
-                                  style={styles.fileInput}
-                                  aria-label={`Add attachments to ${table.title} ${column}`}
-                                  disabled={readOnly || uploadingCell === `${rowIndex}-${column}`}
-                                />
-                              </label>
-                            </span>
+                            {!readOnly && (
+                              <span style={styles.fileActions}>
+                                <label className="audit-attachment-replace" style={styles.replaceButton}>
+                                  {uploadingCell === `${rowIndex}-${column}` ? "Uploading..." : "Add PDFs"}
+                                  <input
+                                    type="file"
+                                    accept=".pdf,application/pdf"
+                                    multiple
+                                    onChange={(event) => {
+                                      handleAttachmentChange(rowIndex, column, event.target.files);
+                                      event.target.value = "";
+                                    }}
+                                    style={styles.fileInput}
+                                    aria-label={`Add attachments to ${table.title} ${column}`}
+                                    disabled={uploadingCell === `${rowIndex}-${column}`}
+                                  />
+                                </label>
+                              </span>
+                            )}
                           </div>
                         ) : (
                           <label className="audit-attachment-button" style={styles.attachmentButton}>
@@ -264,6 +273,18 @@ export default function AuditTable({
                           </label>
                         )}
                       </div>
+                    ) : isDateColumn(column) ? (
+                      <DateInput
+                        value={row[column] ?? ""}
+                        onChange={(value) => handleCellChange(rowIndex, column, value)}
+                        className="audit-table-input"
+                        style={{
+                          ...styles.cellInput,
+                          ...(fitToContainer ? styles.fittedCellInput : {}),
+                        }}
+                        readOnly={readOnly}
+                        aria-label={`${table.title} ${column}`}
+                      />
                     ) : (
                       <input className="audit-table-input"
                         value={row[column] ?? ""}
@@ -488,20 +509,32 @@ const styles = {
     cursor: "pointer",
   },
   attachedFile: {
-    display: "flex",
-    flexDirection: "column",
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(180px, 100%), 1fr))",
     gap: 9,
     width: "100%",
     minHeight: 46,
-    padding: "6px 7px",
-    border: "1px solid #dbe3ef",
-    borderRadius: 8,
-    background: "#f8fafc",
+    padding: 0,
   },
   fileSummary: {
     width: "100%",
     minWidth: 0,
     display: "flex",
+    flexDirection: "column",
+    justifyContent: "space-between",
+    gap: 8,
+    margin: 0,
+    padding: 8,
+    border: "1px solid #dbe3ef",
+    borderRadius: 8,
+    background: "#fff",
+    boxShadow: "0 1px 3px rgba(15, 23, 42, 0.05)",
+  },
+  fileHeader: {
+    width: "100%",
+    minWidth: 0,
+    display: "grid",
+    gridTemplateColumns: "30px minmax(0, 1fr)",
     alignItems: "center",
     gap: 8,
   },
@@ -526,32 +559,44 @@ const styles = {
   attachmentLink: {
     flex: "0 0 auto",
     color: "#1d4ed8",
+    border: "1px solid #bfdbfe",
+    borderRadius: 6,
+    background: "#eff6ff",
+    padding: "4px 8px",
     fontSize: 11,
     fontWeight: 750,
     textDecoration: "none",
   },
   attachmentItemActions: {
+    width: "100%",
     display: "flex",
     flex: "0 0 auto",
     alignItems: "center",
+    justifyContent: "flex-end",
     gap: 8,
+    paddingTop: 7,
+    borderTop: "1px solid #e2e8f0",
   },
   deleteAttachmentButton: {
-    border: 0,
+    border: "1px solid #fecaca",
+    borderRadius: 6,
     color: "#b91c1c",
-    background: "transparent",
-    padding: 0,
+    background: "#fff",
+    padding: "4px 8px",
     fontSize: 10.5,
     fontWeight: 750,
     cursor: "pointer",
   },
   fileName: {
+    display: "-webkit-box",
     overflow: "hidden",
     color: "#1e293b",
     fontSize: 11.5,
     fontWeight: 700,
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
+    lineHeight: 1.35,
+    overflowWrap: "anywhere",
+    WebkitBoxOrient: "vertical",
+    WebkitLineClamp: 2,
   },
   fileType: {
     color: "#64748b",
@@ -562,6 +607,7 @@ const styles = {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
+    gridColumn: "1 / -1",
     gap: 6,
     paddingTop: 5,
     borderTop: "1px solid #e2e8f0",

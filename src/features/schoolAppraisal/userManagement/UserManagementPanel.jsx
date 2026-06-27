@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { getApiErrorMessage } from "../../../api/client";
 import { createUser, deleteUser, fetchUsers, updateUser } from "../../../api/users";
+import { formatDateDDMMYYYY } from "../../../utils/dateFormat";
+import { LoadingState } from "../components/LoadingState";
 import { ADMINISTRATIVE_POSTS, SCHOOL_OPTIONS, canonicalSchoolCode } from "./userManagementConfig";
 
 const emptyForm = {
@@ -78,8 +80,7 @@ const designationForForm = (form) => {
   return form.category === "academic" ? "Director" : postLabelFor(form.post);
 };
 
-const formatDate = (date = new Date()) =>
-  new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric" }).format(date);
+const formatDate = (date = new Date()) => formatDateDDMMYYYY(date);
 
 function validate(form) {
   const errors = {};
@@ -493,7 +494,7 @@ export default function UserManagementPanel() {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan="8" style={styles.emptyCell}>Loading users...</td></tr>
+                <tr><td colSpan="8" style={styles.emptyCell}><LoadingState label="Loading user accounts..." compact /></td></tr>
               ) : users.length ? users.map((user) => (
                 <tr key={user.id}>
                   <td style={styles.td}><strong>{user.name}</strong></td>

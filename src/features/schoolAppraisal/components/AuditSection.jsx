@@ -1,5 +1,6 @@
 //renders a section of the audit form, like part A, part B, etc. It can contain fields and tables
 import AuditTable from "./AuditTable";
+import DateInput from "./DateInput";
 
 function FieldGrid({ fields, values, onFieldChange, readOnly = false }) {
   return (
@@ -40,6 +41,14 @@ function FieldGrid({ fields, values, onFieldChange, readOnly = false }) {
                   </option>
                 ))}
               </select>
+            ) : field.type === "date" ? (
+              <DateInput
+                value={values[field.id] ?? ""}
+                onChange={(value) => onFieldChange(field.id, value)}
+                className="audit-control"
+                style={styles.input}
+                readOnly={readOnly}
+              />
             ) : (
               <input
                 value={values[field.id] ?? ""}

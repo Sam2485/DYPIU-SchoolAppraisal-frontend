@@ -5,6 +5,7 @@ import { buildSubmissionPayload, deleteAttachment, fetchMyDraft, normalizeDraft,
 import universityLogo from "../../../assets/images/image.png";
 import AuditReportPanel from "./AuditReportPanel";
 import AuditSection from "./AuditSection";
+import { InlineSpinner, LoadingState, SkeletonList } from "./LoadingState";
 import { columnsWithSerial, serialColumnFor } from "./tableHelpers";
 
 const emptyRowFor = (columns) =>
@@ -262,7 +263,8 @@ export default function AuditForm({ schema, activeSectionId, reportMode, onRepor
           <button type="button" className="btn btn-secondary" onClick={handleClear} disabled={readOnly}>
             Clear
           </button>
-          <button type="button" className="btn btn-primary" onClick={handleSaveDraft} disabled={readOnly || savingDraft || loadingDraft}>
+          <button type="button" className="btn btn-primary" onClick={handleSaveDraft} disabled={readOnly || savingDraft || loadingDraft} aria-busy={savingDraft}>
+            {savingDraft && <InlineSpinner label="Saving draft" />}
             {savingDraft ? "Saving..." : "Save Draft"}
           </button>
         </div>
@@ -272,10 +274,12 @@ export default function AuditForm({ schema, activeSectionId, reportMode, onRepor
       </header>
 
       {status && <div style={styles.status}>{status}</div>}
-      {loadingDraft && <div style={styles.status}>Loading draft from server...</div>}
+      {loadingDraft && <LoadingState label="Loading saved form..." compact />}
 
       <div style={styles.sections}>
-        {schema.sections
+        {loadingDraft ? (
+          <SkeletonList rows={2} />
+        ) : schema.sections
           .filter((section) => !activeSectionId || section.id === activeSectionId)
           .map((section) => (
             <AuditSection
@@ -308,13 +312,15 @@ export default function AuditForm({ schema, activeSectionId, reportMode, onRepor
               Generate Report
             </button>
             {!isSubmitted && (
-              <button type="button" className="btn btn-primary" onClick={handleSubmit} disabled={submitting}>
+              <button type="button" className="btn btn-primary" onClick={handleSubmit} disabled={submitting} aria-busy={submitting}>
+                {submitting && <InlineSpinner label="Submitting form" />}
                 {submitting ? "Submitting..." : "Submit"}
               </button>
             )}
           </>
         ) : (
-          <button type="button" className="btn btn-primary" onClick={handleSaveAndNext} disabled={readOnly || savingDraft || loadingDraft}>
+          <button type="button" className="btn btn-primary" onClick={handleSaveAndNext} disabled={readOnly || savingDraft || loadingDraft} aria-busy={savingDraft}>
+            {savingDraft && <InlineSpinner label="Saving section" />}
             {savingDraft ? "Saving..." : "Save & Next"}
           </button>
         )}

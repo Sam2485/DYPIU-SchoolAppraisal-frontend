@@ -253,6 +253,11 @@ export const fetchAllSubmissions = () => apiClient.get("/api/submissions/all");
 export const fetchSubmissionById = (id) => apiClient.get(`/api/submissions/${id}`);
 export const fetchSubmissionSnapshots = (id) => apiClient.get(`/api/submissions/${id}/snapshots`);
 export const reviewSubmission = (id, payload) => apiClient.post(`/api/submissions/${id}/review`, payload);
+export const createNextAuditCycle = (id, payload = {}) =>
+  apiClient.post(`/api/submissions/${id}/next-cycle`, {
+    preserveApprovedVersion: true,
+    ...payload,
+  });
 
 export const parseSubmissionFormData = (submission = {}) => ({
   values: safeJsonParse(submission.valuesData ?? submission.values ?? submission.fieldsData ?? submission.fields, {}),
