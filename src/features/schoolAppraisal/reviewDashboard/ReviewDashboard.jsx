@@ -24,6 +24,7 @@ import { InlineSpinner, LoadingState, SkeletonList } from "../components/Loading
 import { columnsWithSerial } from "../components/tableHelpers";
 import { administrativeAuditMeta, administrativeAuditModules } from "../administrativeAudit/administrativeAuditConfig";
 import AdministrativeReportPanel from "../administrativeAudit/AdministrativeReportPanel";
+import AdministrativePartE from "../administrativeAudit/AdministrativePartE";
 import { academicAudit2025Schema } from "../formSchemas";
 import UserManagementPanel from "../userManagement/UserManagementPanel";
 import { ADMINISTRATIVE_POSTS, SCHOOL_OPTIONS, schoolGroupFor } from "../userManagement/userManagementConfig";
@@ -1853,6 +1854,17 @@ function SubmittedFormViewer({ sections, formData, auditType, activeSectionIndex
                 <p key={`${activeSection.id}-text-${blockIndex}`} style={styles.reviewText}>
                   {block.text}
                 </p>
+              );
+            }
+
+            if (block.type === "part-e-schools") {
+              return (
+                <AdministrativePartE
+                  key={`${activeSection.id}-part-e-${blockIndex}`}
+                  value={formData.values[block.fieldId]}
+                  coursesOffered={formData.tables.coursesOffered || []}
+                  readOnly
+                />
               );
             }
 

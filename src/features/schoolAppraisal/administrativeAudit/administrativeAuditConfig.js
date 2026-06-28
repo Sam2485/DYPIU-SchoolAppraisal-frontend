@@ -77,12 +77,12 @@ export const administrativeAuditModules = [
       {
         id: "scholarshipSummary",
         title: "5. Scholarship Details",
-        columns: ["Sr No", "Year", "Title of Scholarship", "Number of the Students", "Amount received", "Awarding Agency", "Awarding Organization"],
+        columns: ["Sr No", "Year", "Title of Scholarship", "Number of the Students", "Amount received", "Awarding Agency", "Awarding Organization", "Attachment"],
       },
       {
         id: "scholarshipStudents",
         title: "6. Scholarship Student Details",
-        columns: ["Sr No", "Year", "Title of Scholarship", "Name of the Students", "Amount received", "Awarding Agency"],
+        columns: ["Sr No", "Year", "Title of Scholarship", "Name of the Students", "Amount received", "Awarding Agency", "Attachment"],
       },
     ],
   },
@@ -262,27 +262,27 @@ export const administrativeAuditModules = [
       {
         id: "hackathons",
         title: "1. Hackathons and Ideation workshops",
-        columns: ["Sr No", "Activity details", "Organized by", "Date of conduction", "Number of beneficiaries / Participants"],
+        columns: ["Sr No", "Activity details", "Organized by", "Date of conduction", "Number of beneficiaries / Participants", "Attachment"],
       },
       {
         id: "culturalActivities",
         title: "2. Cultural Clubs and activities and festivals",
-        columns: ["Sr No", "Activity details", "Organized by", "Date of conduction", "Number of beneficiaries / Participants"],
+        columns: ["Sr No", "Activity details", "Organized by", "Date of conduction", "Number of beneficiaries / Participants", "Attachment"],
       },
       {
         id: "sportsActivities",
         title: "3. Sports clubs / teams and activities",
-        columns: ["Sr No", "Activity details", "Organized by", "Date of conduction", "Number of beneficiaries / Participants"],
+        columns: ["Sr No", "Activity details", "Organized by", "Date of conduction", "Number of beneficiaries / Participants", "Attachment"],
       },
       {
         id: "communityActivities",
         title: "4. Community related activities",
-        columns: ["Sr No", "Activity details", "Organized by", "Date of conduction", "Number of beneficiaries / Participants"],
+        columns: ["Sr No", "Activity details", "Organized by", "Date of conduction", "Number of beneficiaries / Participants", "Attachment"],
       },
       {
         id: "studentAwards",
         title: "5. Awards / Prizes / Recognitions in curricular and extended curricular areas",
-        columns: ["Sr No", "Name of the award", "Team / Individual", "Inter-University / State / National / International", "Name of the event", "Name of the student(s)"],
+        columns: ["Sr No", "Name of the award", "Team / Individual", "Inter-University / State / National / International", "Name of the event", "Name of the student(s)", "Attachment"],
       },
     ],
   },
@@ -294,39 +294,8 @@ export const administrativeAuditModules = [
     note: "(Data to be provided by Dean Industry and Corporate relations, T & P)",
     blocks: [
       {
-        type: "text",
-        text: "Report on Placement, Internship and Training activities:",
-      },
-      {
-        type: "fields",
-        fields: [
-          { id: "placementActivitiesHeading", kind: "heading", label: "(a) Placement Activities: (School wise list of the students to attach)" },
-          { id: "companiesVisited", label: "(i) Number of companies Visited" },
-          { id: "studentsPlaced", label: "(ii) Number of Students Placed" },
-          { id: "highestSalary", label: "(iii) Highest Salary offered" },
-          { id: "averageSalary", label: "(iv) Average salary offered" },
-          { id: "medianSalary", label: "(v) Median Salary offered" },
-          { id: "internshipActivitiesHeading", kind: "heading", label: "(b) Internship Activities: (School wise list of the students to attach)" },
-          { id: "internshipOrganizations", label: "(i) Number of Organizations offered Internships" },
-          { id: "studentsInternships", label: "(ii) Number of Students carried out Internships" },
-          { id: "stipendInternships", label: "(iii) Number of Internships carried out with stipend" },
-          { id: "totalInternships", label: "(iv) Total Number of Internships" },
-        ],
-      },
-      {
-        type: "tables",
-        tables: [
-          {
-            id: "trainingActivities",
-            title: "(c) Report on Training Activities / Skill development / soft skills conducted",
-            columns: ["Sr No", "Academic Year", "Title of the Event", "Date of conduction", "No of students benefited"],
-          },
-          {
-            id: "industryCollaborations",
-            title: "(d) Industry Collaborations",
-            columns: ["Sr No", "Name of the Organization / Institution / Industry with whom MoU is signed", "Year of signing MoU", "Duration of MoU", "List the actual activities under each MoU"],
-          },
-        ],
+        type: "part-e-schools",
+        fieldId: "partESchools",
       },
     ],
   },

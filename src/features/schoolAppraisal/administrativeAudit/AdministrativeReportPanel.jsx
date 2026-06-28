@@ -1,6 +1,7 @@
 import universityLogo from "../../../assets/images/image.png";
 import { SIGN_OFF_FIELD } from "../../../api/submissions";
 import { formatDateDDMMYYYY } from "../../../utils/dateFormat";
+import AdministrativePartE from "./AdministrativePartE";
 
 const moduleBlocksFor = (module) =>
   module.blocks || [
@@ -66,6 +67,18 @@ export default function AdministrativeReportPanel({
                   <p key={`text-${index}`} style={styles.sectionText}>
                     {block.text}
                   </p>
+                );
+              }
+
+              if (block.type === "part-e-schools") {
+                return (
+                  <AdministrativePartE
+                    key={`part-e-${index}`}
+                    value={data.fields[block.fieldId]}
+                    coursesOffered={data.tables.coursesOffered || []}
+                    readOnly
+                    showAllSchools
+                  />
                 );
               }
 

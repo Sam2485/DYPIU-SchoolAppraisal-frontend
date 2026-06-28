@@ -19,6 +19,8 @@ export default function AuditTable({
   onUploadAttachment,
   onDeleteAttachment,
   readOnly = false,
+  allowManualAdd = true,
+  showRowControls = true,
 }) {
   const columns = columnsWithSerial(table.columns);
   const fitToContainer = table.fitToContainer !== false;
@@ -314,14 +316,18 @@ export default function AuditTable({
         </table>
       </div>
 
-      <div style={styles.footer}>
-        <button type="button" className="audit-table-add-row" onClick={() => onAddRow?.(table)} disabled={readOnly}>
-          + Add Row
-        </button>
-        <button type="button" className="audit-table-delete-row" onClick={() => onDeleteLastRow?.(table)} disabled={readOnly || rows.length <= 1}>
-          Delete Last Row
-        </button>
-      </div>
+      {showRowControls && (
+        <div style={styles.footer}>
+          {allowManualAdd && (
+            <button type="button" className="audit-table-add-row" onClick={() => onAddRow?.(table)} disabled={readOnly}>
+              + Add Row
+            </button>
+          )}
+          <button type="button" className="audit-table-delete-row" onClick={() => onDeleteLastRow?.(table)} disabled={readOnly || rows.length <= 1}>
+            Delete Last Row
+          </button>
+        </div>
+      )}
     </section>
   );
 }

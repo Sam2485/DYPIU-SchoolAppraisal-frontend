@@ -8,6 +8,7 @@ import DateInput from "../components/DateInput";
 import { InlineSpinner, LoadingState, SkeletonList } from "../components/LoadingState";
 import { columnsWithSerial, serialColumnFor } from "../components/tableHelpers";
 import AdministrativeReportPanel from "./AdministrativeReportPanel";
+import AdministrativePartE from "./AdministrativePartE";
 import AppSidebar from "../components/AppSidebar";
 import { administrativeAuditMeta, administrativeAuditModules } from "./administrativeAuditConfig";
 
@@ -40,7 +41,11 @@ const moduleBlocksFor = (module) =>
 
 const moduleFieldsFor = (module) =>
   moduleBlocksFor(module)
-    .flatMap((block) => (block.type === "fields" ? block.fields : []))
+    .flatMap((block) => {
+      if (block.type === "fields") return block.fields;
+      if (block.type === "part-e-schools") return [{ id: block.fieldId, initialValue: [] }];
+      return [];
+    })
     .filter((field) => field.kind !== "heading");
 
 const moduleTablesFor = (module) =>
@@ -52,7 +57,7 @@ const buildInitialData = () => {
 
   administrativeAuditModules.forEach((module) => {
     moduleFieldsFor(module).forEach((field) => {
-      fields[field.id] = "";
+      fields[field.id] = field.initialValue ?? "";
     });
     moduleTablesFor(module).forEach((table) => {
       tables[table.id] = normalizeRows(table.columns, table.initialRows?.length ? table.initialRows : [emptyRowFor(table.columns, 0)]);
@@ -194,6 +199,25 @@ export default function AdministrativeAuditDashboard() {
         lastSavedAt: new Date().toISOString(),
       };
     });
+  };
+
+  const uploadFormAttachments = async (files) => {
+    const uploaded = await uploadAttachments(files);
+    setData((current) => ({
+      ...current,
+      attachments: [...(current.attachments || []), ...uploaded],
+      lastSavedAt: new Date().toISOString(),
+    }));
+    return uploaded;
+  };
+
+  const deleteFormAttachment = async (attachment) => {
+    await deleteAttachment(attachment);
+    setData((current) => ({
+      ...current,
+      attachments: (current.attachments || []).filter((file) => file.url !== attachment.url),
+      lastSavedAt: new Date().toISOString(),
+    }));
   };
 
   const resetDraft = () => {
@@ -357,6 +381,20 @@ export default function AdministrativeAuditDashboard() {
                 );
               }
 
+              if (block.type === "part-e-schools") {
+                return (
+                  <AdministrativePartE
+                    key={`part-e-${index}`}
+                    value={data.fields[block.fieldId]}
+                    coursesOffered={data.tables.coursesOffered || []}
+                    onChange={(value) => setFieldValue(block.fieldId, value)}
+                    onUploadAttachment={uploadFormAttachments}
+                    onDeleteAttachment={deleteFormAttachment}
+                    readOnly={readOnly}
+                  />
+                );
+              }
+
               return (
                 <div key={`tables-${index}`} style={styles.tables}>
                   {block.tables.map((table) => (
@@ -367,23 +405,8 @@ export default function AdministrativeAuditDashboard() {
                   onCellChange={setCellValue}
                   onAddRow={addRow}
                   onDeleteLastRow={deleteLastRow}
-                  onUploadAttachment={async (files) => {
-                    const uploaded = await uploadAttachments(files);
-                    setData((current) => ({
-                      ...current,
-                      attachments: [...(current.attachments || []), ...uploaded],
-                      lastSavedAt: new Date().toISOString(),
-                    }));
-                    return uploaded;
-                  }}
-                  onDeleteAttachment={async (attachment) => {
-                    await deleteAttachment(attachment);
-                    setData((current) => ({
-                      ...current,
-                      attachments: (current.attachments || []).filter((file) => file.url !== attachment.url),
-                      lastSavedAt: new Date().toISOString(),
-                    }));
-                  }}
+                  onUploadAttachment={uploadFormAttachments}
+                  onDeleteAttachment={deleteFormAttachment}
                   readOnly={readOnly}
                 />
                   ))}
