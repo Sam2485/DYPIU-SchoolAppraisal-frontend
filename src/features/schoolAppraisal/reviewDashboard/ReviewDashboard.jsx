@@ -741,7 +741,9 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
     setError("");
 
     try {
-      const response = await downloadSubmissionAttachments(submission.id);
+      const response = await downloadSubmissionAttachments(submission.id, {
+        includeAllContributors: submission.auditType === "administrative",
+      });
       const archive = response.data instanceof Blob
         ? response.data
         : new Blob([response.data], { type: "application/zip" });

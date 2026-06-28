@@ -207,7 +207,10 @@ export default function AdministrativePartE({
 
   const renderTable = (school, key) => {
     const table = tableDefinitions[key];
-    const rows = school[key] || [];
+    const storedRows = school[key] || [];
+    const rows = !storedRows.length && ["trainingActivities", "industryCollaborations"].includes(key)
+      ? [emptyRow(table.columns, 0)]
+      : storedRows;
     return (
       <AuditTable
         key={`${school.schoolCode}-${key}`}

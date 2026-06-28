@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getApiErrorMessage } from "../../../api/client";
-import { buildSubmissionPayload, deleteAttachment, fetchMyDraft, normalizeDraft, saveDraft, signOffProfileFromSession, submitDraft, uploadAttachments, withSubmitterSignOff } from "../../../api/submissions";
+import { SIGN_OFF_FIELD, buildSubmissionPayload, deleteAttachment, fetchMyDraft, normalizeDraft, saveDraft, signOffProfileFromSession, submitDraft, uploadAttachments, withSubmitterSignOff } from "../../../api/submissions";
 import universityLogo from "../../../assets/images/image.png";
 import AuditTable from "../components/AuditTable";
 import DateInput from "../components/DateInput";
@@ -83,6 +83,18 @@ const moduleFieldsFor = (module) =>
 const moduleTablesFor = (module) =>
   moduleBlocksFor(module).flatMap((block) => (block.type === "tables" ? block.tables : []));
 
+const ensureDefaultTableRows = (tables = {}) => {
+  const nextTables = { ...tables };
+  administrativeAuditModules.forEach((module) => {
+    moduleTablesFor(module).forEach((table) => {
+      if (!Array.isArray(nextTables[table.id]) || !nextTables[table.id].length) {
+        nextTables[table.id] = [emptyRowFor(table.columns, 0)];
+      }
+    });
+  });
+  return nextTables;
+};
+
 const buildInitialData = () => {
   const fields = {};
   const tables = {};
@@ -92,12 +104,9 @@ const buildInitialData = () => {
       fields[field.id] = field.initialValue ?? "";
     });
     moduleTablesFor(module).forEach((table) => {
-      tables[table.id] = normalizeRows(table.columns, table.initialRows?.length ? table.initialRows : [emptyRowFor(table.columns, 0)]);
+      tables[table.id] = [emptyRowFor(table.columns, 0)];
     });
   });
-
-  fields.universityName = administrativeAuditMeta.university;
-  fields.address = administrativeAuditMeta.address;
 
   return { fields, tables, attachments: [], lastSavedAt: "" };
 };
@@ -127,6 +136,7 @@ export default function AdministrativeAuditDashboard() {
   const [submitting, setSubmitting] = useState(false);
   const [hasExistingSubmission, setHasExistingSubmission] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [contributionApproved, setContributionApproved] = useState(false);
   const [data, setData] = useState(buildInitialData);
 
   const activeModule = useMemo(
@@ -136,7 +146,7 @@ export default function AdministrativeAuditDashboard() {
   const activeModuleIndex = administrativeUserModules.findIndex((module) => module.id === activeModuleId);
   const isLastModule = activeModuleIndex === administrativeUserModules.length - 1;
   const canEditActiveModule = moduleOwnerPost(activeModule) === userPost;
-  const readOnly = isSubmitted || !canEditActiveModule;
+  const readOnly = isSubmitted || contributionApproved || !canEditActiveModule;
 
   const handleModuleChange = (moduleId) => {
     setReportMode(false);
@@ -159,12 +169,14 @@ export default function AdministrativeAuditDashboard() {
         if (!isActive) return;
         setData({
           fields: draft.values,
-          tables: draft.tables,
+          tables: ensureDefaultTableRows(draft.tables),
           attachments: draft.attachments,
           lastSavedAt: new Date().toISOString(),
         });
         setHasExistingSubmission(draft.exists);
         setIsSubmitted(draft.isSubmitted);
+        const contributionStatus = String(draft.administrativeProgress?.[userPost] || "").toLowerCase();
+        setContributionApproved(["approved", "submitted"].includes(contributionStatus));
       } catch (error) {
         if (isActive) setStatus(getApiErrorMessage(error, "Could not load your draft from the server."));
       } finally {
@@ -177,7 +189,7 @@ export default function AdministrativeAuditDashboard() {
     return () => {
       isActive = false;
     };
-  }, []);
+  }, [userPost]);
 
   useEffect(() => {
     if (!reportMode || !printReportAfterRender) return undefined;
@@ -281,13 +293,26 @@ export default function AdministrativeAuditDashboard() {
     setStatus(`Section ${activeModule.number} cleared.`);
   };
 
-  const currentPayload = () =>
-    buildSubmissionPayload({
-      auditType: "administrative",
-      values: data.fields,
-      tables: data.tables,
-      attachments: data.attachments,
-    });
+  const payloadForModules = (modules, values = data.fields) => {
+    const fieldIds = modules.flatMap((module) => moduleFieldsFor(module).map((field) => field.id));
+    const tableIds = modules.flatMap((module) => moduleTablesFor(module).map((table) => table.id));
+    const scopedValues = Object.fromEntries(fieldIds.map((fieldId) => [fieldId, values[fieldId] ?? ""]));
+    if (values[SIGN_OFF_FIELD]) scopedValues[SIGN_OFF_FIELD] = values[SIGN_OFF_FIELD];
+    const scopedTables = Object.fromEntries(tableIds.map((tableId) => [tableId, data.tables[tableId] || []]));
+    return {
+      ...buildSubmissionPayload({
+        auditType: "administrative",
+        values: scopedValues,
+        tables: scopedTables,
+        attachments: uniqueAttachments({ fields: scopedValues, tables: scopedTables }),
+      }),
+      sharedAdministrativeForm: true,
+      contributorPost: userPost,
+      sections: modules.map((module) => module.number),
+    };
+  };
+
+  const currentPayload = () => payloadForModules([activeModule]);
 
   const saveAndGoNext = async () => {
     if (readOnly) return;
@@ -321,29 +346,38 @@ export default function AdministrativeAuditDashboard() {
     navigate("/login", { replace: true });
   };
 
-  const handleSubmit = async () => {
-    if (isSubmitted) return;
+  const handleApprove = async () => {
+    if (isSubmitted || contributionApproved) return;
     setSubmitting(true);
     setSubmitStatus("");
 
     try {
       const signedFields = withSubmitterSignOff(data.fields, signOffProfileFromSession("administrative"));
       const signedData = { ...data, fields: signedFields };
-      await submitDraft(
-        buildSubmissionPayload({
-          auditType: "administrative",
-          values: signedFields,
-          tables: data.tables,
-          attachments: data.attachments,
-        }),
+      const ownedModules = administrativeUserModules.filter((module) => moduleOwnerPost(module) === userPost);
+      const { data: approvalResponse } = await submitDraft(
+        {
+          ...payloadForModules(ownedModules, signedFields),
+          action: "APPROVE_CONTRIBUTION",
+        },
         { isUpdate: hasExistingSubmission },
       );
       setHasExistingSubmission(true);
-      setIsSubmitted(true);
+      setContributionApproved(true);
+      const overallStatus = String(
+        approvalResponse?.data?.overallStatus ||
+        approvalResponse?.overallStatus ||
+        approvalResponse?.data?.status ||
+        approvalResponse?.status ||
+        ""
+      ).toLowerCase().replaceAll("_", "-");
+      if (["submitted", "under-review", "auditor-completed", "approved"].includes(overallStatus)) {
+        setIsSubmitted(true);
+      }
       setData({ ...signedData, submittedAt: new Date().toISOString(), lastSavedAt: new Date().toISOString() });
-      setSubmitStatus("Administrative Audit submitted successfully.");
+      setSubmitStatus("Your Administrative Audit sections were approved. The shared form will move to IQAC after all four authorities approve.");
     } catch (error) {
-      setSubmitStatus(getApiErrorMessage(error, "Could not submit Administrative Audit."));
+      setSubmitStatus(getApiErrorMessage(error, "Could not approve your Administrative Audit sections."));
     } finally {
       setSubmitting(false);
     }
@@ -420,7 +454,7 @@ export default function AdministrativeAuditDashboard() {
                 {activeModule.note && <p style={styles.moduleNote}>{activeModule.note}</p>}
               </div>
               <span style={canEditActiveModule ? styles.badge : styles.readOnlyBadge}>
-                {canEditActiveModule ? "Editable" : "Read only"}
+                {canEditActiveModule ? (contributionApproved ? "Approved" : "Editable") : "Read only"}
               </span>
             </div>
 
@@ -489,10 +523,10 @@ export default function AdministrativeAuditDashboard() {
                   >
                     Generate Report
                   </button>
-                  {!isSubmitted && (
-                    <button type="button" className="btn btn-primary" onClick={handleSubmit} disabled={submitting} aria-busy={submitting}>
-                      {submitting && <InlineSpinner label="Submitting form" />}
-                      {submitting ? "Submitting..." : "Submit"}
+                  {!isSubmitted && !contributionApproved && (
+                    <button type="button" className="btn btn-primary" onClick={handleApprove} disabled={submitting} aria-busy={submitting}>
+                      {submitting && <InlineSpinner label="Approving sections" />}
+                      {submitting ? "Approving..." : "Approve"}
                     </button>
                   )}
                 </>

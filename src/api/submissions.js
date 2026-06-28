@@ -155,6 +155,7 @@ export const normalizeDraft = (payload = {}, fallbackValues = {}, fallbackTables
     ...safeJsonParse(valuesData, {}),
   };
   const status = String(draft.status || "").trim().toLowerCase().replaceAll("_", "-");
+  const overallStatus = String(draft.overallStatus || status).trim().toLowerCase().replaceAll("_", "-");
 
   return {
     id: draft.id || draft.submissionId || null,
@@ -167,7 +168,12 @@ export const normalizeDraft = (payload = {}, fallbackValues = {}, fallbackTables
       draft.status,
     ),
     status,
-    isSubmitted: Boolean(status && !["draft", "sent-back"].includes(status)),
+    overallStatus,
+    isSubmitted: ["submitted", "under-review", "auditor-completed", "approved"].includes(overallStatus),
+    administrativeProgress: safeJsonParse(
+      draft.administrativeProgress || draft.sectionProgress || draft.contributionProgress,
+      {},
+    ),
     values,
     tables: {
       ...fallbackTables,
@@ -211,7 +217,12 @@ export const buildSubmissionPayload = ({ auditType, values, tables, attachments 
 });
 
 export const fetchMyDraft = (auditType) =>
-  apiClient.get("/api/submissions/my-draft", { params: { auditType } });
+  apiClient.get("/api/submissions/my-draft", {
+    params: {
+      auditType,
+      ...(auditType === "administrative" ? { shared: true } : {}),
+    },
+  });
 
 export const saveDraft = (payload, { isUpdate = false } = {}) =>
   apiClient.request({
@@ -278,8 +289,9 @@ export const fetchAllSubmissions = () => apiClient.get("/api/submissions/all");
 export const fetchSubmissionById = (id) => apiClient.get(`/api/submissions/${id}`);
 export const fetchSubmissionSnapshots = (id) => apiClient.get(`/api/submissions/${id}/snapshots`);
 export const reviewSubmission = (id, payload) => apiClient.post(`/api/submissions/${id}/review`, payload);
-export const downloadSubmissionAttachments = (id) =>
+export const downloadSubmissionAttachments = (id, { includeAllContributors = false } = {}) =>
   apiClient.get(`/api/submissions/${id}/attachments/download`, {
+    params: includeAllContributors ? { includeAllContributors: true } : undefined,
     responseType: "blob",
   });
 export const createNextAuditCycle = (id, payload = {}) =>
