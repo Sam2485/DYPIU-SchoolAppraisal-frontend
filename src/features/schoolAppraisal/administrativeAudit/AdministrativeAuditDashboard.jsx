@@ -14,6 +14,17 @@ import { administrativeAuditMeta, administrativeAuditModules } from "./administr
 
 const administrativeUserModules = administrativeAuditModules.filter((module) => module.id !== "section-f-observations-recommendations");
 
+const normalizePost = (value = "") => {
+  const normalized = String(value).trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  if (normalized === "hr" || normalized.includes("human resource")) return "hr";
+  if (normalized === "dsw" || normalized.includes("student welfare")) return "dean-student-welfare";
+  if (normalized.includes("dean placement") || normalized === "placement") return "dean-placement";
+  if (normalized.includes("registrar")) return "registrar";
+  return normalized.replaceAll(" ", "-");
+};
+
+const moduleOwnerPost = (module) => normalizePost(module.owner);
+
 const emptyRowFor = (columns, index) => {
   const row = columnsWithSerial(columns).reduce((value, column) => {
     value[column] = "";
@@ -32,6 +43,27 @@ const normalizeRows = (columns, rows) => {
     ...(serialColumn ? { [serialColumn]: row[serialColumn] || String(index + 1) } : {}),
   }));
 };
+
+const collectAttachments = (value, attachments = []) => {
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectAttachments(item, attachments));
+    return attachments;
+  }
+  if (!value || typeof value !== "object") return attachments;
+  if (value.url || value.publicUrl || value.downloadUrl) {
+    attachments.push(value);
+    return attachments;
+  }
+  Object.values(value).forEach((item) => collectAttachments(item, attachments));
+  return attachments;
+};
+
+const uniqueAttachments = (values) => [...new Map(
+  collectAttachments(values).map((attachment) => [
+    attachment.url || attachment.publicUrl || attachment.downloadUrl,
+    attachment,
+  ])
+).values()];
 
 const moduleBlocksFor = (module) =>
   module.blocks || [
@@ -73,6 +105,7 @@ const buildInitialData = () => {
 const getUserProfile = () => ({
   name: sessionStorage.getItem("name") || "Administrative User",
   designation: sessionStorage.getItem("designation") || "Registrar",
+  post: sessionStorage.getItem("post") || "",
   school: sessionStorage.getItem("school") || "Administrative Office",
   email: sessionStorage.getItem("email") || sessionStorage.getItem("username") || "",
 });
@@ -80,7 +113,10 @@ const getUserProfile = () => ({
 export default function AdministrativeAuditDashboard() {
   const navigate = useNavigate();
   const academicYear = sessionStorage.getItem("academicYear") || administrativeAuditMeta.academicYear;
-  const [activeModuleId, setActiveModuleId] = useState(administrativeUserModules[0].id);
+  const profile = getUserProfile();
+  const userPost = normalizePost(profile.post || profile.designation);
+  const firstOwnedModule = administrativeUserModules.find((module) => moduleOwnerPost(module) === userPost);
+  const [activeModuleId, setActiveModuleId] = useState(firstOwnedModule?.id || administrativeUserModules[0].id);
   const [reportMode, setReportMode] = useState(false);
   const [printReportAfterRender, setPrintReportAfterRender] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
@@ -97,10 +133,10 @@ export default function AdministrativeAuditDashboard() {
     () => administrativeUserModules.find((module) => module.id === activeModuleId) || administrativeUserModules[0],
     [activeModuleId],
   );
-  const profile = getUserProfile();
   const activeModuleIndex = administrativeUserModules.findIndex((module) => module.id === activeModuleId);
   const isLastModule = activeModuleIndex === administrativeUserModules.length - 1;
-  const readOnly = isSubmitted;
+  const canEditActiveModule = moduleOwnerPost(activeModule) === userPost;
+  const readOnly = isSubmitted || !canEditActiveModule;
 
   const handleModuleChange = (moduleId) => {
     setReportMode(false);
@@ -220,13 +256,29 @@ export default function AdministrativeAuditDashboard() {
     }));
   };
 
-  const resetDraft = () => {
-    if (!window.confirm("Are you sure you want to reset the form? All unsaved changes will be lost.")) return;
+  const resetActiveModule = () => {
+    if (!canEditActiveModule) return;
+    if (!window.confirm(`Reset Section ${activeModule.number}? Unsaved data in this section will be cleared.`)) return;
 
-    const nextData = buildInitialData();
-    setData(nextData);
-    setIsSubmitted(false);
-    setStatus("Form cleared.");
+    setData((current) => {
+      const initial = buildInitialData();
+      const fields = { ...current.fields };
+      const tables = { ...current.tables };
+      moduleFieldsFor(activeModule).forEach((field) => {
+        fields[field.id] = initial.fields[field.id];
+      });
+      moduleTablesFor(activeModule).forEach((table) => {
+        tables[table.id] = initial.tables[table.id];
+      });
+      return {
+        ...current,
+        fields,
+        tables,
+        attachments: uniqueAttachments({ fields, tables }),
+        lastSavedAt: new Date().toISOString(),
+      };
+    });
+    setStatus(`Section ${activeModule.number} cleared.`);
   };
 
   const currentPayload = () =>
@@ -238,6 +290,7 @@ export default function AdministrativeAuditDashboard() {
     });
 
   const saveAndGoNext = async () => {
+    if (readOnly) return;
     setSavingDraft(true);
     setStatus("");
     const nextData = { ...data, lastSavedAt: new Date().toISOString() };
@@ -269,6 +322,7 @@ export default function AdministrativeAuditDashboard() {
   };
 
   const handleSubmit = async () => {
+    if (isSubmitted) return;
     setSubmitting(true);
     setSubmitStatus("");
 
@@ -346,8 +400,8 @@ export default function AdministrativeAuditDashboard() {
               </div>
             </div>
             <div className="admin-audit-actions" style={styles.headerActions}>
-              <button type="button" className="btn btn-secondary" onClick={resetDraft} disabled={readOnly || loadingDraft || savingDraft}>
-                Reset
+              <button type="button" className="btn btn-secondary" onClick={resetActiveModule} disabled={readOnly || loadingDraft || savingDraft}>
+                Reset Section
               </button>
             </div>
           </header>
@@ -365,8 +419,16 @@ export default function AdministrativeAuditDashboard() {
                 </h2>
                 {activeModule.note && <p style={styles.moduleNote}>{activeModule.note}</p>}
               </div>
-              <span style={styles.badge}>Server draft</span>
+              <span style={canEditActiveModule ? styles.badge : styles.readOnlyBadge}>
+                {canEditActiveModule ? "Editable" : "Read only"}
+              </span>
             </div>
+
+            {!canEditActiveModule && (
+              <div style={styles.ownershipNotice}>
+                This section can only be edited by {activeModule.owner}.
+              </div>
+            )}
 
             {moduleBlocksFor(activeModule).map((block, index) => {
               if (block.type === "fields") {
@@ -872,6 +934,26 @@ const styles = {
     fontWeight: 700,
     letterSpacing: ".04em",
     textTransform: "uppercase",
+  },
+  readOnlyBadge: {
+    borderRadius: 999,
+    background: "#f1f5f9",
+    color: "#475569",
+    padding: "5px 9px",
+    fontSize: 9.5,
+    fontWeight: 700,
+    letterSpacing: ".04em",
+    textTransform: "uppercase",
+  },
+  ownershipNotice: {
+    marginBottom: 16,
+    border: "1px solid #fde68a",
+    borderRadius: 7,
+    padding: "10px 12px",
+    color: "#92400e",
+    background: "#fffbeb",
+    fontSize: 12,
+    fontWeight: 650,
   },
   fieldGrid: {
     display: "grid",
