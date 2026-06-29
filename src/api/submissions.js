@@ -302,6 +302,12 @@ export const createNextAuditCycle = (id, payload = {}) =>
 export const startNextAcademicYear = (payload) =>
   apiClient.post("/api/audit-cycles/start-next", payload);
 
+export const submitAdministrativePart = (cycleId) =>
+  apiClient.post(`/api/submissions/administrative/${encodeURIComponent(cycleId)}/submit`);
+
+export const fetchAdministrativeStatus = (cycleId) =>
+  apiClient.get(`/api/submissions/administrative/${encodeURIComponent(cycleId)}/status`);
+
 export const parseSubmissionFormData = (submission = {}) => ({
   values: safeJsonParse(submission.valuesData ?? submission.values ?? submission.fieldsData ?? submission.fields, {}),
   tables: safeJsonParse(submission.tablesData ?? submission.tables, {}),

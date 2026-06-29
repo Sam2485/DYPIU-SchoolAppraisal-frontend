@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getApiErrorMessage } from "../../../api/client";
-import { SIGN_OFF_FIELD, buildSubmissionPayload, deleteAttachment, fetchMyDraft, normalizeDraft, saveDraft, signOffProfileFromSession, submitDraft, uploadAttachments, withSubmitterSignOff } from "../../../api/submissions";
+import { SIGN_OFF_FIELD, buildSubmissionPayload, deleteAttachment, fetchMyDraft, normalizeDraft, saveDraft, signOffProfileFromSession, submitDraft, uploadAttachments, withSubmitterSignOff, fetchAdministrativeStatus, submitAdministrativePart } from "../../../api/submissions";
 import universityLogo from "../../../assets/images/image.png";
 import AuditTable from "../components/AuditTable";
 import DateInput from "../components/DateInput";
@@ -12,7 +12,15 @@ import AdministrativePartE from "./AdministrativePartE";
 import AppSidebar from "../components/AppSidebar";
 import { administrativeAuditMeta, administrativeAuditModules } from "./administrativeAuditConfig";
 
-const administrativeUserModules = administrativeAuditModules.filter((module) => module.id !== "section-f-observations-recommendations");
+const administrativeUserModules = [
+  ...administrativeAuditModules.filter((module) => module.id !== "section-f-observations-recommendations"),
+  {
+    id: "submission-status",
+    number: "",
+    title: "Submission Status",
+    owner: "system",
+  }
+];
 
 const normalizePost = (value = "") => {
   const normalized = String(value).trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
@@ -453,65 +461,100 @@ export default function AdministrativeAuditDashboard() {
                 </h2>
                 {activeModule.note && <p style={styles.moduleNote}>{activeModule.note}</p>}
               </div>
-              <span style={canEditActiveModule ? styles.badge : styles.readOnlyBadge}>
-                {canEditActiveModule ? (contributionApproved ? "Approved" : "Editable") : "Read only"}
-              </span>
+              {activeModuleId !== "submission-status" && (
+                <span style={canEditActiveModule ? styles.badge : styles.readOnlyBadge}>
+                  {canEditActiveModule ? (contributionApproved ? "Approved" : "Editable") : "Read only"}
+                </span>
+              )}
             </div>
 
-            {!canEditActiveModule && (
+            {!canEditActiveModule && activeModuleId !== "submission-status" && (
               <div style={styles.ownershipNotice}>
                 This section can only be edited by {activeModule.owner}.
               </div>
             )}
 
-            {moduleBlocksFor(activeModule).map((block, index) => {
-              if (block.type === "fields") {
-                return <FieldGrid key={`fields-${index}`} fields={block.fields} data={data} onChange={setFieldValue} readOnly={readOnly} />;
-              }
+            {activeModuleId === "submission-status" ? (
+              <SubmissionStatusPanel
+                data={data}
+                userPost={userPost}
+                academicYear={academicYear}
+                hasExistingSubmission={hasExistingSubmission}
+                onSubmitted={(updatedDraft) => {
+                  setData((current) => ({
+                    ...current,
+                    fields: updatedDraft.values,
+                    tables: ensureDefaultTableRows(updatedDraft.tables),
+                    attachments: updatedDraft.attachments,
+                    lastSavedAt: new Date().toISOString(),
+                  }));
+                  setHasExistingSubmission(updatedDraft.exists);
+                  setIsSubmitted(updatedDraft.isSubmitted);
+                  const contributionStatus = String(updatedDraft.administrativeProgress?.[userPost] || "").toLowerCase();
+                  setContributionApproved(["approved", "submitted"].includes(contributionStatus));
+                }}
+              />
+            ) : (
+              moduleBlocksFor(activeModule).map((block, index) => {
+                if (block.type === "fields") {
+                  return <FieldGrid key={`fields-${index}`} fields={block.fields} data={data} onChange={setFieldValue} readOnly={readOnly} />;
+                }
 
-              if (block.type === "text") {
+                if (block.type === "text") {
+                  return (
+                    <p key={`text-${index}`} style={styles.sectionText}>
+                      {block.text}
+                    </p>
+                  );
+                }
+
+                if (block.type === "part-e-schools") {
+                  return (
+                    <AdministrativePartE
+                      key={`part-e-${index}`}
+                      value={data.fields[block.fieldId]}
+                      coursesOffered={data.tables.coursesOffered || []}
+                      onChange={(value) => setFieldValue(block.fieldId, value)}
+                      onUploadAttachment={uploadFormAttachments}
+                      onDeleteAttachment={deleteFormAttachment}
+                      readOnly={readOnly}
+                    />
+                  );
+                }
+
                 return (
-                  <p key={`text-${index}`} style={styles.sectionText}>
-                    {block.text}
-                  </p>
+                  <div key={`tables-${index}`} style={styles.tables}>
+                    {block.tables.map((table) => (
+                      <AuditTable
+                        key={table.id}
+                        table={table}
+                        rows={data.tables[table.id] || []}
+                        onCellChange={setCellValue}
+                        onAddRow={addRow}
+                        onDeleteLastRow={deleteLastRow}
+                        onUploadAttachment={uploadFormAttachments}
+                        onDeleteAttachment={deleteFormAttachment}
+                        readOnly={readOnly}
+                      />
+                    ))}
+                  </div>
                 );
-              }
-
-              if (block.type === "part-e-schools") {
-                return (
-                  <AdministrativePartE
-                    key={`part-e-${index}`}
-                    value={data.fields[block.fieldId]}
-                    coursesOffered={data.tables.coursesOffered || []}
-                    onChange={(value) => setFieldValue(block.fieldId, value)}
-                    onUploadAttachment={uploadFormAttachments}
-                    onDeleteAttachment={deleteFormAttachment}
-                    readOnly={readOnly}
-                  />
-                );
-              }
-
-              return (
-                <div key={`tables-${index}`} style={styles.tables}>
-                  {block.tables.map((table) => (
-                    <AuditTable
-                      key={table.id}
-                      table={table}
-                  rows={data.tables[table.id] || []}
-                  onCellChange={setCellValue}
-                  onAddRow={addRow}
-                  onDeleteLastRow={deleteLastRow}
-                  onUploadAttachment={uploadFormAttachments}
-                  onDeleteAttachment={deleteFormAttachment}
-                  readOnly={readOnly}
-                />
-                  ))}
-                </div>
-              );
-            })}
+              })
+            )}
 
             <div style={styles.sectionFooter}>
-              {isLastModule ? (
+              {activeModuleId === "submission-status" ? (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setReportMode(true);
+                    setPrintReportAfterRender(true);
+                  }}
+                >
+                  Generate Report
+                </button>
+              ) : isLastModule ? (
                 <>
                   <button
                     type="button"
@@ -1119,4 +1162,276 @@ const styles = {
     fontWeight: 900,
     cursor: "pointer",
   },
+};
+
+function SubmissionStatusPanel({ data, userPost, academicYear, hasExistingSubmission, onSubmitted }) {
+  const [statusMap, setStatusMap] = useState({
+    registrar: { submitted: false, submittedAt: null, name: null, email: null },
+    hr: { submitted: false, submittedAt: null, name: null, email: null },
+    deanStudentWelfare: { submitted: false, submittedAt: null, name: null, email: null },
+    deanPlacement: { submitted: false, submittedAt: null, name: null, email: null }
+  });
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+
+  const roles = [
+    { key: "registrar", label: "Registrar", post: "registrar" },
+    { key: "hr", label: "HR", post: "hr" },
+    { key: "deanStudentWelfare", label: "Dean Student Welfare", post: "dean-student-welfare" },
+    { key: "deanPlacement", label: "Dean Placement", post: "dean-placement" }
+  ];
+
+  const fetchStatus = async () => {
+    try {
+      setLoading(true);
+      const { data: res } = await fetchAdministrativeStatus(academicYear);
+      if (res) {
+        setStatusMap({
+          registrar: res.registrar || statusMap.registrar,
+          hr: res.hr || statusMap.hr,
+          deanStudentWelfare: res.deanStudentWelfare || statusMap.deanStudentWelfare,
+          deanPlacement: res.deanPlacement || statusMap.deanPlacement
+        });
+      }
+    } catch (err) {
+      setError(getApiErrorMessage(err, "Failed to load submission status."));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchStatus();
+  }, [academicYear]);
+
+  const handleSubmitPart = async () => {
+    if (!window.confirm("Are you sure you want to submit your part of the Administrative Audit? This will lock your section from further edits.")) {
+      return;
+    }
+    setSubmitting(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const { data: res } = await submitAdministrativePart(academicYear);
+      setSuccess("Your section has been submitted successfully!");
+      const { data: updatedStatus } = await fetchAdministrativeStatus(academicYear);
+      if (updatedStatus) {
+        setStatusMap({
+          registrar: updatedStatus.registrar || statusMap.registrar,
+          hr: updatedStatus.hr || statusMap.hr,
+          deanStudentWelfare: updatedStatus.deanStudentWelfare || statusMap.deanStudentWelfare,
+          deanPlacement: updatedStatus.deanPlacement || statusMap.deanPlacement
+        });
+      }
+      const normalized = normalizeDraft(res);
+      onSubmitted(normalized);
+    } catch (err) {
+      setError(getApiErrorMessage(err, "Failed to submit your section."));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (loading) {
+    return <LoadingState label="Loading status..." compact />;
+  }
+
+  return (
+    <div style={statusStyles.container}>
+      <h3 style={statusStyles.title}>Section Submission Progress</h3>
+      <p style={statusStyles.intro}>
+        The complete Administrative Appraisal Form will transition to the next step once all four roles have submitted their respective parts.
+      </p>
+
+      {error && <div style={statusStyles.error}>{error}</div>}
+      {success && <div style={statusStyles.success}>{success}</div>}
+
+      <div style={statusStyles.table}>
+        <div style={statusStyles.tableHeader}>
+          <div style={statusStyles.colRole}>Authority / Role</div>
+          <div style={statusStyles.colStatus}>Status</div>
+          <div style={statusStyles.colDetails}>Submission Details</div>
+          <div style={statusStyles.colAction}>Action</div>
+        </div>
+
+        {roles.map((r) => {
+          const info = statusMap[r.key] || { submitted: false, submittedAt: null, name: null, email: null };
+          const isCurrentUser = r.post === userPost;
+          const formattedDate = info.submittedAt ? new Date(info.submittedAt).toLocaleString() : "";
+
+          return (
+            <div key={r.key} style={statusStyles.tableRow}>
+              <div style={statusStyles.colRole}>
+                <strong>{r.label}</strong>
+              </div>
+              <div style={statusStyles.colStatus}>
+                <span style={info.submitted ? statusStyles.badgeSubmitted : statusStyles.badgePending}>
+                  {info.submitted ? "Submitted" : "Pending"}
+                </span>
+              </div>
+              <div style={statusStyles.colDetails}>
+                {info.submitted ? (
+                  <div style={statusStyles.detailsText}>
+                    <span>By: {info.name || "N/A"} ({info.email || "N/A"})</span>
+                    <span style={statusStyles.timestamp}>On: {formattedDate}</span>
+                  </div>
+                ) : (
+                  <span style={statusStyles.pendingText}>Waiting for submission</span>
+                )}
+              </div>
+              <div style={statusStyles.colAction}>
+                {isCurrentUser && (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={handleSubmitPart}
+                    disabled={info.submitted || submitting}
+                    style={info.submitted ? statusStyles.disabledBtn : statusStyles.submitBtn}
+                  >
+                    {submitting ? "Submitting..." : info.submitted ? "Submitted" : "Submit My Part"}
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+const statusStyles = {
+  container: {
+    padding: "8px 0"
+  },
+  title: {
+    margin: "0 0 10px",
+    color: "#0f172a",
+    fontSize: 18,
+    fontWeight: 700
+  },
+  intro: {
+    color: "#475569",
+    fontSize: 13.5,
+    lineHeight: 1.5,
+    marginBottom: 20
+  },
+  error: {
+    border: "1px solid #fecaca",
+    borderRadius: 8,
+    background: "#fef2f2",
+    color: "#991b1b",
+    padding: "10px 14px",
+    fontSize: 13.5,
+    fontWeight: 650,
+    marginBottom: 16
+  },
+  success: {
+    border: "1px solid #bbf7d0",
+    borderRadius: 8,
+    background: "#f0fdf4",
+    color: "#166534",
+    padding: "10px 14px",
+    fontSize: 13.5,
+    fontWeight: 650,
+    marginBottom: 16
+  },
+  table: {
+    border: "1px solid #e2e8f0",
+    borderRadius: 12,
+    overflow: "hidden",
+    background: "#fff"
+  },
+  tableHeader: {
+    display: "flex",
+    background: "#f8fafc",
+    borderBottom: "1px solid #e2e8f0",
+    padding: "12px 16px",
+    fontWeight: 700,
+    fontSize: 13,
+    color: "#475569"
+  },
+  tableRow: {
+    display: "flex",
+    alignItems: "center",
+    borderBottom: "1px solid #f1f5f9",
+    padding: "16.5px 16px",
+    fontSize: 14,
+    color: "#0f172a"
+  },
+  colRole: {
+    flex: "1.2",
+    minWidth: 150
+  },
+  colStatus: {
+    flex: "0.8",
+    minWidth: 100
+  },
+  colDetails: {
+    flex: "2",
+    minWidth: 200
+  },
+  colAction: {
+    flex: "1",
+    minWidth: 130,
+    textAlign: "right"
+  },
+  badgeSubmitted: {
+    display: "inline-block",
+    borderRadius: 6,
+    background: "#dcfce7",
+    color: "#166534",
+    padding: "4px 8px",
+    fontSize: 11,
+    fontWeight: 700
+  },
+  badgePending: {
+    display: "inline-block",
+    borderRadius: 6,
+    background: "#fef3c7",
+    color: "#d97706",
+    padding: "4px 8px",
+    fontSize: 11,
+    fontWeight: 700
+  },
+  detailsText: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 3,
+    fontSize: 12.5,
+    color: "#334155"
+  },
+  timestamp: {
+    color: "#64748b",
+    fontSize: 11.5
+  },
+  pendingText: {
+    color: "#94a3b8",
+    fontSize: 12.5,
+    fontStyle: "italic"
+  },
+  submitBtn: {
+    background: "#2563eb",
+    border: "none",
+    color: "#fff",
+    borderRadius: 6,
+    padding: "8px 12px",
+    fontSize: 12.5,
+    fontWeight: 700,
+    cursor: "pointer",
+    transition: "background 0.2s"
+  },
+  disabledBtn: {
+    background: "#f1f5f9",
+    border: "1px solid #cbd5e1",
+    color: "#94a3b8",
+    borderRadius: 6,
+    padding: "8px 12px",
+    fontSize: 12.5,
+    fontWeight: 700,
+    cursor: "not-allowed"
+  }
 };
