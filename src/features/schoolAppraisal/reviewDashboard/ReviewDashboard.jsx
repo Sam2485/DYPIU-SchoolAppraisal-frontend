@@ -452,7 +452,7 @@ const normalizeSubmission = (submission = {}) => {
     parentSubmissionId: submission.parentSubmissionId || submission.previousSubmissionId || null,
     previousApprovedSubmissionId: submission.previousApprovedSubmissionId || submission.sourceApprovedSubmissionId || null,
     hasNextCycle: Boolean(submission.hasNextCycle || submission.nextCycleStarted || submission.nextVersionId),
-    sections: submission.sections || sectionsForAudit(auditType),
+    sections: (Array.isArray(submission.sections) && submission.sections.length && typeof submission.sections[0] === "object") ? submission.sections : sectionsForAudit(auditType),
     attachments: formData.attachments.length ? formData.attachments : submission.attachments || [],
     status: normalizeStatus(submission.status),
     remarks: submission.remarks || "",
@@ -2988,7 +2988,7 @@ const styles = {
     fontFamily: "inherit",
   },
   activeSectionNavButton: {
-    borderColor: "#2563eb",
+    border: "1px solid #2563eb",
     background: "#2563eb",
     color: "#fff",
     boxShadow: "0 8px 18px rgba(37, 99, 235, 0.18)",

@@ -74,7 +74,7 @@ export const getSubmissionSignOff = (submission = {}, values = {}) => {
 
   return {
     submittedBy: {
-      name: stored.submittedBy?.name || submission.submittedByName || submission.submittedBy || submission.createdBy || submission.user?.name || "",
+      name: stored.submittedBy?.name || submission.submittedByName || (typeof submission.submittedBy === "string" ? submission.submittedBy : "") || submission.createdBy || submission.user?.name || "",
       designation: stored.submittedBy?.designation || submission.submittedByDesignation || submission.submitterDesignation || submission.user?.designation || "",
       role: normalizeRole(stored.submittedBy?.role || submission.submittedByRole || submission.user?.role || ""),
       date: stored.submittedBy?.date || submission.submittedOn || submission.submittedAt || submission.createdAt || "",
