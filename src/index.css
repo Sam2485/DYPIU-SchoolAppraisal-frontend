@@ -37,9 +37,13 @@ body {
   flex: 0 0 292px;
   display: flex;
   flex-direction: column;
-  gap: 24px;
-  padding: 24px 18px 18px;
-  overflow: hidden;
+  gap: 18px;
+  padding: 22px 18px 16px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, .7) transparent;
   color: #dbeafe;
   background:
     radial-gradient(circle at 12% 0%, rgba(59, 130, 246, .22), transparent 32%),
@@ -53,7 +57,7 @@ body {
 .app-sidebar__brand-copy { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
 .app-sidebar__brand-copy strong { color: #fff; font-size: 14px; font-weight: 700; line-height: 1.2; letter-spacing: -.01em; }
 .app-sidebar__brand-copy span { color: #8292ad; font-size: 11.5px; line-height: 1.25; }
-.app-sidebar__context { display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; padding: 14px; border: 1px solid rgba(148, 163, 184, .16); border-radius: 14px; background: rgba(51, 65, 85, .58); }
+.app-sidebar__context { display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; padding: 12px 14px; border: 1px solid rgba(148, 163, 184, .16); border-radius: 14px; background: rgba(51, 65, 85, .58); }
 .app-sidebar__context > div { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
 .app-sidebar__context strong { color: #f8fafc; font-size: 13px; font-weight: 650; line-height: 1.25; }
 .app-sidebar__context small { overflow: hidden; color: #91a4c2; font-size: 11px; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
@@ -65,7 +69,7 @@ body {
 .app-sidebar__nav-label svg { width: 14px; height: 14px; transition: transform .18s ease; }
 .app-sidebar__nav-label[aria-expanded="true"] svg { transform: rotate(180deg); }
 .app-sidebar__dropdown { position: relative; }
-.app-sidebar__select-card { position: relative; width: 100%; min-height: 62px; display: flex; align-items: center; gap: 11px; padding: 11px 12px; border: 1px solid rgba(147, 197, 253, .28); border-radius: 13px; color: #fff; background: linear-gradient(135deg, #2563eb, #1d4ed8); box-shadow: 0 10px 24px rgba(15, 23, 42, .22); cursor: pointer; font-family: inherit; text-align: left; transition: border-color .18s ease, transform .18s ease, box-shadow .18s ease; }
+.app-sidebar__select-card { position: relative; width: 100%; min-height: 56px; display: flex; align-items: center; gap: 11px; padding: 9px 12px; border: 1px solid rgba(147, 197, 253, .28); border-radius: 13px; color: #fff; background: linear-gradient(135deg, #2563eb, #1d4ed8); box-shadow: 0 10px 24px rgba(15, 23, 42, .22); cursor: pointer; font-family: inherit; text-align: left; transition: border-color .18s ease, transform .18s ease, box-shadow .18s ease; }
 .app-sidebar__select-card:hover, .app-sidebar__select-card:focus-within { border-color: rgba(147, 197, 253, .55); transform: translateY(-1px); box-shadow: 0 13px 28px rgba(2, 6, 23, .23); }
 .app-sidebar__select-icon { width: 36px; height: 36px; flex: 0 0 36px; display: grid; place-items: center; border-radius: 10px; color: #dbeafe; background: rgba(255,255,255,.12); }
 .app-sidebar__select-copy { min-width: 0; display: flex; flex: 1; flex-direction: column; gap: 3px; pointer-events: none; }
@@ -73,7 +77,10 @@ body {
 .app-sidebar__select-copy strong { overflow: hidden; color: #fff; font-size: 12.5px; font-weight: 650; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
 .app-sidebar__chevron { width: 25px; height: 25px; flex: 0 0 25px; display: grid; place-items: center; border-radius: 7px; color: #bfdbfe; background: rgba(255,255,255,.08); pointer-events: none; transition: transform .18s ease; }
 .app-sidebar__dropdown.is-open .app-sidebar__chevron { transform: rotate(180deg); }
-.app-sidebar__menu { position: absolute; z-index: 50; top: calc(100% + 8px); left: 0; right: 0; max-height: min(390px, 48vh); padding: 6px; overflow-y: auto; border: 1px solid rgba(148, 163, 184, .18); border-radius: 13px; background: #1e293b; box-shadow: 0 20px 42px rgba(2, 6, 23, .42); scrollbar-width: thin; scrollbar-color: #64748b transparent; animation: sidebar-menu-in .14s ease-out; }
+.app-sidebar__menu { position: static; z-index: 50; max-height: min(270px, max(170px, calc(100vh - 490px))); margin-top: 8px; padding: 6px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; border: 1px solid rgba(148, 163, 184, .18); border-radius: 13px; background: #1e293b; box-shadow: 0 20px 42px rgba(2, 6, 23, .42); scrollbar-width: thin; scrollbar-color: #64748b transparent; animation: sidebar-menu-in .14s ease-out; }
+.app-sidebar__menu::-webkit-scrollbar { width: 8px; }
+.app-sidebar__menu::-webkit-scrollbar-track { background: transparent; }
+.app-sidebar__menu::-webkit-scrollbar-thumb { border: 2px solid #1e293b; border-radius: 999px; background: #64748b; }
 .app-sidebar__menu-item { width: 100%; min-height: 43px; display: flex; align-items: center; gap: 10px; padding: 8px 9px; border: 0; border-radius: 9px; color: #aebbd0; background: transparent; cursor: pointer; font-family: inherit; font-size: 11.5px; font-weight: 550; line-height: 1.3; text-align: left; transition: color .14s ease, background .14s ease; }
 .app-sidebar__menu-item:hover { color: #fff; background: rgba(148, 163, 184, .1); }
 .app-sidebar__menu-item.is-selected { color: #fff; background: rgba(37, 99, 235, .3); }
@@ -84,7 +91,7 @@ body {
 .app-sidebar__menu-item.is-selected .app-sidebar__menu-copy small { color: #93c5fd; }
 .app-sidebar__menu-check { flex: 0 0 auto; color: #7dd3fc; font-size: 11px; }
 @keyframes sidebar-menu-in { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
-.app-sidebar__nav-hint { padding: 8px 10px 0; color: #607391; font-size: 9.5px; line-height: 1.4; }
+.app-sidebar__nav-hint { padding: 6px 10px 0; color: #607391; font-size: 9.5px; line-height: 1.4; }
 .app-sidebar__action-groups { min-height: 0; display: flex; flex-direction: column; gap: 16px; margin-top: 16px; overflow-x: hidden; overflow-y: auto; scrollbar-width: none; }
 .app-sidebar__action-groups::-webkit-scrollbar { display: none; }
 .app-sidebar__action-group { display: flex; flex-direction: column; gap: 7px; }
@@ -104,13 +111,13 @@ body {
 .app-sidebar__nav-item.is-active small { color: #bfdbfe; }
 .app-sidebar__nav-text strong { overflow: hidden; font-size: 12.5px; font-weight: 600; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
 .app-sidebar__active-dot { position: absolute; right: 10px; width: 5px; height: 5px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 3px rgba(255,255,255,.12); }
-.app-sidebar__support { display: flex; align-items: center; gap: 10px; padding: 11px 12px; border: 1px solid rgba(148, 163, 184, .1); border-radius: 12px; color: inherit; background: rgba(255,255,255,.025); text-decoration: none; transition: border-color .18s, background .18s; }
+.app-sidebar__support { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border: 1px solid rgba(148, 163, 184, .1); border-radius: 12px; color: inherit; background: rgba(255,255,255,.025); text-decoration: none; transition: border-color .18s, background .18s; }
 .app-sidebar__support:hover { border-color: rgba(96, 165, 250, .3); background: rgba(37, 99, 235, .08); }
 .app-sidebar__support-icon { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; color: #60a5fa; background: rgba(37, 99, 235, .13); }
 .app-sidebar__support > span:last-child { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .app-sidebar__support small { color: #7183a0; font-size: 9.5px; }
 .app-sidebar__support strong { overflow: hidden; color: #bfdbfe; font-size: 10.5px; font-weight: 550; text-overflow: ellipsis; }
-.app-sidebar__profile { display: flex; align-items: center; gap: 10px; padding: 14px 4px 0; border-top: 1px solid rgba(148, 163, 184, .12); }
+.app-sidebar__profile { display: flex; align-items: center; gap: 10px; padding: 12px 4px 0; border-top: 1px solid rgba(148, 163, 184, .12); }
 .app-sidebar__avatar { width: 36px; height: 36px; flex: 0 0 36px; display: grid; place-items: center; border-radius: 11px; color: #1e3a8a; background: linear-gradient(145deg, #dbeafe, #93c5fd); font-size: 11px; font-weight: 800; }
 .app-sidebar__profile-copy { min-width: 0; display: flex; flex: 1; flex-direction: column; gap: 2px; }
 .app-sidebar__profile-copy strong, .app-sidebar__profile-copy span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -120,7 +127,7 @@ body {
 .app-sidebar__logout:hover { color: #fca5a5; background: rgba(239, 68, 68, .1); }
 
 @media (max-width: 900px) {
-  .app-sidebar { width: 100% !important; height: auto; position: relative; inset: auto; flex-basis: auto; gap: 14px; padding: 16px; }
+  .app-sidebar { width: 100% !important; height: auto; position: relative; inset: auto; flex-basis: auto; gap: 14px; padding: 16px; overflow: visible; }
   .app-sidebar + main { width: 100%; margin-left: 0; }
   .app-sidebar__context { display: none; }
   .app-sidebar__nav { order: 3; }
