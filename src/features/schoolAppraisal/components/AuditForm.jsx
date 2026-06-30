@@ -5,6 +5,8 @@ import universityLogo from "../../../assets/images/image.png";
 import AuditReportPanel from "./AuditReportPanel";
 import AuditSection from "./AuditSection";
 import { InlineSpinner, LoadingState, SkeletonList } from "./LoadingState";
+import SubmissionConfirmation from "./SubmissionConfirmation";
+import { emptySubmissionConfirmation, isSubmissionConfirmed } from "./submissionConfirmationState";
 import { columnsWithSerial, serialColumnFor } from "./tableHelpers";
 
 const emptyRowFor = (columns) =>
@@ -73,12 +75,14 @@ export default function AuditForm({ schema, academicYear = schema.academicYear, 
   const [loadingDraft, setLoadingDraft] = useState(true);
   const [savingDraft, setSavingDraft] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [submissionConfirmation, setSubmissionConfirmation] = useState(emptySubmissionConfirmation);
   const [hasExistingSubmission, setHasExistingSubmission] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [printReportAfterRender, setPrintReportAfterRender] = useState(false);
   const activeSectionIndex = Math.max(0, schema.sections.findIndex((section) => section.id === activeSectionId));
   const isLastSection = activeSectionIndex === schema.sections.length - 1;
   const readOnly = isSubmitted;
+  const canSubmit = isSubmissionConfirmed(submissionConfirmation);
   const progress = Math.round(((activeSectionIndex + 1) / schema.sections.length) * 100);
 
   useEffect(() => {
@@ -210,6 +214,11 @@ export default function AuditForm({ schema, academicYear = schema.academicYear, 
   };
 
   const handleSubmit = async () => {
+    if (!canSubmit) {
+      setSubmitStatus("Please confirm both declarations before submitting.");
+      return;
+    }
+
     setSubmitting(true);
     setSubmitStatus("");
 
@@ -309,6 +318,14 @@ export default function AuditForm({ schema, academicYear = schema.academicYear, 
           ))}
       </div>
 
+      {isLastSection && !isSubmitted && (
+        <SubmissionConfirmation
+          value={submissionConfirmation}
+          onChange={setSubmissionConfirmation}
+          disabled={submitting}
+        />
+      )}
+
       <div style={styles.sectionFooter}>
         {isLastSection ? (
           <>
@@ -316,7 +333,7 @@ export default function AuditForm({ schema, academicYear = schema.academicYear, 
               Generate Report
             </button>
             {!isSubmitted && (
-              <button type="button" className="btn btn-primary" onClick={handleSubmit} disabled={submitting} aria-busy={submitting}>
+              <button type="button" className="btn btn-primary" onClick={handleSubmit} disabled={submitting || !canSubmit} aria-busy={submitting}>
                 {submitting && <InlineSpinner label="Submitting form" />}
                 {submitting ? "Submitting..." : "Submit"}
               </button>
