@@ -129,6 +129,41 @@ const getUserProfile = () => ({
   email: sessionStorage.getItem("email") || sessionStorage.getItem("username") || "",
 });
 
+const ADMIN_SUBMISSION_STATUS_FIELD = "__administrativeSubmissionStatus";
+
+const normalizeSubmittedAt = (value) => {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+
+  const timestamp = String(value).trim();
+  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(timestamp);
+  const hasTime = /T\d{2}:\d{2}/.test(timestamp);
+  const date = new Date(hasTime && !hasTimezone ? `${timestamp}Z` : timestamp);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const formatSubmittedDateTime = (value) => {
+  const date = normalizeSubmittedAt(value);
+  if (!date) return "";
+
+  return new Intl.DateTimeFormat("en-IN", {
+    timeZone: "Asia/Kolkata",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: true,
+  }).format(date);
+};
+
+const storedAdministrativeStatusFor = (fields = {}) => (
+  fields[ADMIN_SUBMISSION_STATUS_FIELD] && typeof fields[ADMIN_SUBMISSION_STATUS_FIELD] === "object"
+    ? fields[ADMIN_SUBMISSION_STATUS_FIELD]
+    : {}
+);
+
 export default function AdministrativeAuditDashboard() {
   const navigate = useNavigate();
   const academicYear = sessionStorage.getItem("academicYear") || administrativeAuditMeta.academicYear;
@@ -310,6 +345,7 @@ export default function AdministrativeAuditDashboard() {
     const tableIds = modules.flatMap((module) => moduleTablesFor(module).map((table) => table.id));
     const scopedValues = Object.fromEntries(fieldIds.map((fieldId) => [fieldId, values[fieldId] ?? ""]));
     if (values[SIGN_OFF_FIELD]) scopedValues[SIGN_OFF_FIELD] = values[SIGN_OFF_FIELD];
+    if (values[ADMIN_SUBMISSION_STATUS_FIELD]) scopedValues[ADMIN_SUBMISSION_STATUS_FIELD] = values[ADMIN_SUBMISSION_STATUS_FIELD];
     const scopedTables = Object.fromEntries(tableIds.map((tableId) => [tableId, data.tables[tableId] || []]));
     return {
       ...buildSubmissionPayload({
@@ -356,6 +392,45 @@ export default function AdministrativeAuditDashboard() {
   const handleLogout = () => {
     sessionStorage.clear();
     navigate("/login", { replace: true });
+  };
+
+  const storeAdministrativeSubmissionStatus = async ({ roleKey, submittedAt, confirmation }) => {
+    const profile = getUserProfile();
+    const nextFields = {
+      ...data.fields,
+      [ADMIN_SUBMISSION_STATUS_FIELD]: {
+        ...storedAdministrativeStatusFor(data.fields),
+        [roleKey]: {
+          submitted: true,
+          submittedAt,
+          timeZone: "Asia/Kolkata",
+          name: profile.name,
+          email: profile.email,
+          designation: profile.designation,
+          confirmation,
+        },
+      },
+    };
+
+    setData((current) => ({
+      ...current,
+      fields: nextFields,
+      lastSavedAt: new Date().toISOString(),
+    }));
+
+    await saveDraft(
+      {
+        ...buildSubmissionPayload({
+          auditType: "administrative",
+          values: nextFields,
+          tables: data.tables,
+          attachments: uniqueAttachments({ fields: nextFields, tables: data.tables }),
+        }),
+        sharedAdministrativeForm: true,
+        contributorPost: userPost,
+      },
+      { isUpdate: hasExistingSubmission },
+    );
   };
 
   const handleApprove = async () => {
@@ -487,10 +562,15 @@ export default function AdministrativeAuditDashboard() {
               <SubmissionStatusPanel
                 userPost={userPost}
                 academicYear={academicYear}
+                storedSubmissionStatus={storedAdministrativeStatusFor(data.fields)}
+                onStoreSubmissionStatus={storeAdministrativeSubmissionStatus}
                 onSubmitted={(updatedDraft) => {
                   setData((current) => ({
                     ...current,
-                    fields: updatedDraft.values,
+                    fields: {
+                      ...updatedDraft.values,
+                      [ADMIN_SUBMISSION_STATUS_FIELD]: updatedDraft.values[ADMIN_SUBMISSION_STATUS_FIELD] || current.fields[ADMIN_SUBMISSION_STATUS_FIELD],
+                    },
                     tables: ensureDefaultTableRows(updatedDraft.tables),
                     attachments: updatedDraft.attachments,
                     lastSavedAt: new Date().toISOString(),
@@ -1179,7 +1259,7 @@ const styles = {
   },
 };
 
-function SubmissionStatusPanel({ userPost, academicYear, onSubmitted }) {
+function SubmissionStatusPanel({ userPost, academicYear, storedSubmissionStatus = {}, onStoreSubmissionStatus, onSubmitted }) {
   const [statusMap, setStatusMap] = useState({
     registrar: { submitted: false, submittedAt: null, name: null, email: null },
     hr: { submitted: false, submittedAt: null, name: null, email: null },
@@ -1202,6 +1282,10 @@ function SubmissionStatusPanel({ userPost, academicYear, onSubmitted }) {
   const currentSubmissionInfo = currentRole ? statusMap[currentRole.key] : null;
   const needsSubmissionConfirmation = Boolean(currentRole && !currentSubmissionInfo?.submitted);
   const canSubmitPart = !needsSubmissionConfirmation || isSubmissionConfirmed(submissionConfirmation);
+  const updateSubmissionConfirmation = (value) => {
+    setSubmissionConfirmation(value);
+    setError("");
+  };
 
   useEffect(() => {
     let isActive = true;
@@ -1247,15 +1331,34 @@ function SubmissionStatusPanel({ userPost, academicYear, onSubmitted }) {
     setSuccess("");
 
     try {
+      const submittedAt = new Date().toISOString();
       const { data: res } = await submitAdministrativePart(academicYear);
+      if (currentRole) {
+        await onStoreSubmissionStatus?.({
+          roleKey: currentRole.key,
+          submittedAt,
+          confirmation: submissionConfirmation,
+        });
+      }
       setSuccess("Your section has been submitted successfully!");
       const { data: updatedStatus } = await fetchAdministrativeStatus(academicYear);
       if (updatedStatus) {
-        setStatusMap({
-          registrar: updatedStatus.registrar || statusMap.registrar,
-          hr: updatedStatus.hr || statusMap.hr,
-          deanStudentWelfare: updatedStatus.deanStudentWelfare || statusMap.deanStudentWelfare,
-          deanPlacement: updatedStatus.deanPlacement || statusMap.deanPlacement
+        setStatusMap((current) => {
+          const nextStatus = {
+            registrar: updatedStatus.registrar || current.registrar,
+            hr: updatedStatus.hr || current.hr,
+            deanStudentWelfare: updatedStatus.deanStudentWelfare || current.deanStudentWelfare,
+            deanPlacement: updatedStatus.deanPlacement || current.deanPlacement
+          };
+
+          if (currentRole && nextStatus[currentRole.key]?.submitted) {
+            nextStatus[currentRole.key] = {
+              ...nextStatus[currentRole.key],
+              submittedAt: storedSubmissionStatus[currentRole.key]?.submittedAt || nextStatus[currentRole.key]?.submittedAt || submittedAt,
+            };
+          }
+
+          return nextStatus;
         });
       }
       const normalized = normalizeDraft(res);
@@ -1285,7 +1388,7 @@ function SubmissionStatusPanel({ userPost, academicYear, onSubmitted }) {
         <div style={statusStyles.confirmationWrap}>
           <SubmissionConfirmation
             value={submissionConfirmation}
-            onChange={setSubmissionConfirmation}
+            onChange={updateSubmissionConfirmation}
             disabled={submitting}
           />
         </div>
@@ -1301,9 +1404,17 @@ function SubmissionStatusPanel({ userPost, academicYear, onSubmitted }) {
 
         {roles.map((r) => {
           const info = statusMap[r.key] || { submitted: false, submittedAt: null, name: null, email: null };
+          const storedInfo = storedSubmissionStatus[r.key] || {};
+          const mergedInfo = {
+            ...info,
+            submitted: info.submitted,
+            submittedAt: storedInfo.submittedAt || info.submittedAt,
+            name: storedInfo.name || info.name,
+            email: storedInfo.email || info.email,
+          };
           const isCurrentUser = r.post === userPost;
-          const isActionDisabled = info.submitted || submitting || !canSubmitPart;
-          const formattedDate = info.submittedAt ? new Date(info.submittedAt).toLocaleString() : "";
+          const isActionDisabled = mergedInfo.submitted || submitting || (isCurrentUser && !canSubmitPart);
+          const formattedDate = formatSubmittedDateTime(mergedInfo.submittedAt);
 
           return (
             <div key={r.key} style={statusStyles.tableRow}>
@@ -1311,14 +1422,14 @@ function SubmissionStatusPanel({ userPost, academicYear, onSubmitted }) {
                 <strong>{r.label}</strong>
               </div>
               <div style={statusStyles.colStatus}>
-                <span style={info.submitted ? statusStyles.badgeSubmitted : statusStyles.badgePending}>
-                  {info.submitted ? "Submitted" : "Pending"}
+                <span style={mergedInfo.submitted ? statusStyles.badgeSubmitted : statusStyles.badgePending}>
+                  {mergedInfo.submitted ? "Submitted" : "Pending"}
                 </span>
               </div>
               <div style={statusStyles.colDetails}>
-                {info.submitted ? (
+                {mergedInfo.submitted ? (
                   <div style={statusStyles.detailsText}>
-                    <span>By: {info.name || "N/A"} ({info.email || "N/A"})</span>
+                    <span>By: {mergedInfo.name || "N/A"} ({mergedInfo.email || "N/A"})</span>
                     <span style={statusStyles.timestamp}>On: {formattedDate}</span>
                   </div>
                 ) : (
