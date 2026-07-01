@@ -301,22 +301,44 @@ export default function AdministrativePartE({
           )}
 
           {!readOnly && (
-            <div style={styles.addRow}>
-              <label style={styles.controlLabel}>
-                <span>Programs Offered by Selected School</span>
-                <select className="audit-control" style={styles.select} value={programChoice} onChange={(event) => setProgramChoice(event.target.value)}>
-                  <option value="">Select program</option>
-                  {programOptions.map((program) => <option key={program} value={program}>{program}</option>)}
-                  <option value="__other">Other program</option>
-                </select>
-              </label>
-              {programChoice === "__other" && (
-                <label style={styles.controlLabel}>
-                  <span>Program Name</span>
-                  <input className="audit-control" style={styles.input} value={customProgram} onChange={(event) => setCustomProgram(event.target.value)} />
+            <div style={styles.programComposer}>
+              <div style={styles.programComposerFields}>
+                <label style={{ ...styles.controlLabel, ...styles.programSelectField }}>
+                  <span>Program</span>
+                  <select
+                    className="audit-control"
+                    style={styles.select}
+                    value={programChoice}
+                    onChange={(event) => {
+                      setProgramChoice(event.target.value);
+                      if (event.target.value !== "__other") setCustomProgram("");
+                    }}
+                  >
+                    <option value="">Select program</option>
+                    {programOptions.map((program) => <option key={program} value={program}>{program}</option>)}
+                    <option value="__other">Other program</option>
+                  </select>
                 </label>
-              )}
-              <button type="button" className="btn btn-secondary" onClick={() => addProgram(school)} disabled={!programChoice || (programChoice === "__other" && !customProgram.trim())}>
+                {programChoice === "__other" && (
+                  <label style={{ ...styles.controlLabel, ...styles.customProgramField }}>
+                    <span>Other Program Name</span>
+                    <input
+                      className="audit-control"
+                      style={styles.input}
+                      value={customProgram}
+                      onChange={(event) => setCustomProgram(event.target.value)}
+                      placeholder="Enter program name"
+                    />
+                  </label>
+                )}
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={styles.programAddButton}
+                onClick={() => addProgram(school)}
+                disabled={!programChoice || (programChoice === "__other" && !customProgram.trim())}
+              >
                 Add Program
               </button>
             </div>
@@ -370,6 +392,11 @@ const styles = {
   emptyState: { padding: 18, border: "1px dashed #cbd5e1", borderRadius: 7, color: "#64748b", background: "#f8fafc", fontSize: 12, textAlign: "center" },
   schoolSection: { display: "flex", flexDirection: "column", gap: 18 },
   schoolHeading: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, paddingBottom: 10, borderBottom: "1px solid #cbd5e1" },
+  programComposer: { display: "flex", alignItems: "end", flexWrap: "wrap", gap: 10, padding: 12, border: "1px solid #e2e8f0", borderRadius: 7, background: "#f8fafc" },
+  programComposerFields: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", flex: "1 1 560px", gap: 10, alignItems: "end" },
+  programSelectField: { minWidth: 0, flex: "initial" },
+  customProgramField: { minWidth: 0, flex: "initial" },
+  programAddButton: { minHeight: 42, alignSelf: "end" },
   addRow: { display: "flex", alignItems: "flex-end", flexWrap: "wrap", gap: 10, padding: 12, border: "1px solid #e2e8f0", borderRadius: 7, background: "#f8fafc" },
   addSchoolArea: { display: "flex", alignItems: "flex-end", justifyContent: "flex-start", flexWrap: "wrap", gap: 10, paddingTop: 16, borderTop: "1px solid #dbe3ef" },
 };
