@@ -4,8 +4,11 @@ import { getApiErrorMessage } from "../../../api/client";
 import { columnsWithSerial, serialColumnFor } from "./tableHelpers";
 import DateInput from "./DateInput";
 
-const isAttachmentColumn = (column) => /\b(link|proof|attachment|document|mom)\b/i.test(column);
-const isDateColumn = (column) => /^\s*date\s*$/i.test(column);
+const isAttachmentColumn = (column, table = {}) =>
+  !table.urlColumns?.includes(column) && /\b(link|proof|attachment|document|mom)\b/i.test(column);
+const isDateColumn = (column, table = {}) =>
+  table.dateColumns?.includes(column) || /^\s*date\s*$/i.test(column);
+const isUrlColumn = (column, table = {}) => table.urlColumns?.includes(column);
 
 export default function AuditTable({
   table,
@@ -175,7 +178,7 @@ export default function AuditTable({
               <tr key={`${table.id}-${rowIndex}`}>
                 {columns.map((column) => (
                   <td key={column} style={{ ...styles.td, ...(serialColumnFor([column]) ? styles.serialCell : {}) }}>
-                    {isAttachmentColumn(column) ? (
+                    {isAttachmentColumn(column, table) ? (
                       <div style={styles.attachmentCell}>
                         {(Array.isArray(row[column]) ? row[column] : row[column] ? [row[column]] : []).length ? (
                           <div className="audit-attached-file" style={styles.attachedFile}>
@@ -275,7 +278,7 @@ export default function AuditTable({
                           </label>
                         )}
                       </div>
-                    ) : isDateColumn(column) ? (
+                    ) : isDateColumn(column, table) ? (
                       <DateInput
                         value={row[column] ?? ""}
                         onChange={(value) => handleCellChange(rowIndex, column, value)}
@@ -289,6 +292,7 @@ export default function AuditTable({
                       />
                     ) : (
                       <input className="audit-table-input"
+                        type={isUrlColumn(column, table) ? "url" : "text"}
                         value={row[column] ?? ""}
                         onChange={(event) => handleCellChange(rowIndex, column, event.target.value)}
                         style={{

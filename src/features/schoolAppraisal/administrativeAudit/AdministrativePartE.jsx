@@ -24,6 +24,15 @@ const ACTIVITY_COLUMNS = [
   "Certificates Attachment",
 ];
 
+const SESSION_ACTIVITY_COLUMNS = [
+  "Sr No",
+  "Title of the Session",
+  "Name of the Resource Person",
+  "Date of Conduction",
+  "No. of Beneficiaries",
+  "Link for Proofs",
+];
+
 const TRAINING_COLUMNS = [
   "Sr No",
   "Academic Year",
@@ -42,14 +51,6 @@ const COLLABORATION_COLUMNS = [
   "Attachment",
 ];
 
-const ACTIVITY_OPTIONS = [
-  "Internship",
-  "Training / Skill Development",
-  "Career Guidance",
-  "Industry Interaction",
-  "Other",
-];
-
 const tableDefinitions = {
   placementPrograms: {
     id: "placementPrograms",
@@ -58,8 +59,26 @@ const tableDefinitions = {
   },
   activities: {
     id: "activities",
-    title: "Section B - Activities",
+    title: "Section B1 - Internship",
     columns: ACTIVITY_COLUMNS,
+  },
+  careerGuidanceActivities: {
+    id: "careerGuidanceActivities",
+    title: "Section B2 - Career Guidance",
+    columns: SESSION_ACTIVITY_COLUMNS,
+    dateColumns: ["Date of Conduction"],
+  },
+  industryInteractionActivities: {
+    id: "industryInteractionActivities",
+    title: "Section B3 - Industry Interaction",
+    columns: SESSION_ACTIVITY_COLUMNS,
+    dateColumns: ["Date of Conduction"],
+  },
+  otherActivities: {
+    id: "otherActivities",
+    title: "Section B4 - Other Activities",
+    columns: SESSION_ACTIVITY_COLUMNS,
+    dateColumns: ["Date of Conduction"],
   },
   trainingActivities: {
     id: "trainingActivities",
@@ -102,7 +121,10 @@ const newSchoolEntry = (code) => {
     schoolCode: code,
     schoolName: school?.name || code,
     placementPrograms: [],
-    activities: [],
+    activities: [emptyRow(ACTIVITY_COLUMNS, 0, { Activity: "Internship" })],
+    careerGuidanceActivities: [emptyRow(SESSION_ACTIVITY_COLUMNS, 0)],
+    industryInteractionActivities: [emptyRow(SESSION_ACTIVITY_COLUMNS, 0)],
+    otherActivities: [emptyRow(SESSION_ACTIVITY_COLUMNS, 0)],
     trainingActivities: [emptyRow(TRAINING_COLUMNS, 0)],
     industryCollaborations: [emptyRow(COLLABORATION_COLUMNS, 0)],
   };
@@ -123,8 +145,6 @@ export default function AdministrativePartE({
   const [newSchoolCode, setNewSchoolCode] = useState("");
   const [programChoice, setProgramChoice] = useState("");
   const [customProgram, setCustomProgram] = useState("");
-  const [activityChoice, setActivityChoice] = useState("");
-  const [customActivity, setCustomActivity] = useState("");
   const [deletingSchoolCode, setDeletingSchoolCode] = useState("");
 
   const programOptions = useMemo(() => [...new Set(
@@ -191,24 +211,18 @@ export default function AdministrativePartE({
     setCustomProgram("");
   };
 
-  const addActivity = (school) => {
-    const activity = activityChoice === "Other" ? customActivity.trim() : activityChoice;
-    if (!activity) return;
-    const rows = school.activities || [];
-    updateRows(
-      school.schoolCode,
-      "activities",
-      [...rows, emptyRow(ACTIVITY_COLUMNS, rows.length, { Activity: activity })]
-    );
-    setActivityChoice("");
-    setCustomActivity("");
-  };
-
   const renderTable = (school, key) => {
     const table = tableDefinitions[key];
     const storedRows = school[key] || [];
-    const rows = !storedRows.length && ["trainingActivities", "industryCollaborations"].includes(key)
-      ? [emptyRow(table.columns, 0)]
+    const rows = !storedRows.length && [
+      "activities",
+      "careerGuidanceActivities",
+      "industryInteractionActivities",
+      "otherActivities",
+      "trainingActivities",
+      "industryCollaborations",
+    ].includes(key)
+      ? [emptyRow(table.columns, 0, key === "activities" ? { Activity: "Internship" } : {})]
       : storedRows;
     return (
       <AuditTable
@@ -225,13 +239,16 @@ export default function AdministrativePartE({
         onAddRow={() => updateRows(
           school.schoolCode,
           key,
-          [...rows, emptyRow(table.columns, rows.length)]
+          [
+            ...rows,
+            emptyRow(table.columns, rows.length, key === "activities" ? { Activity: "Internship" } : {})
+          ]
         )}
         onDeleteLastRow={() => updateRows(school.schoolCode, key, rows.slice(0, -1))}
         onUploadAttachment={onUploadAttachment}
         onDeleteAttachment={onDeleteAttachment}
         readOnly={readOnly}
-        allowManualAdd={!["placementPrograms", "activities"].includes(key)}
+        allowManualAdd={!["placementPrograms"].includes(key)}
         showRowControls={!readOnly}
       />
     );
@@ -306,27 +323,10 @@ export default function AdministrativePartE({
           )}
           {renderTable(school, "placementPrograms")}
 
-          {!readOnly && (
-            <div style={styles.addRow}>
-              <label style={styles.controlLabel}>
-                <span>Activities</span>
-                <select className="audit-control" style={styles.select} value={activityChoice} onChange={(event) => setActivityChoice(event.target.value)}>
-                  <option value="">Select activity</option>
-                  {ACTIVITY_OPTIONS.map((activity) => <option key={activity} value={activity}>{activity}</option>)}
-                </select>
-              </label>
-              {activityChoice === "Other" && (
-                <label style={styles.controlLabel}>
-                  <span>Activity Name</span>
-                  <input className="audit-control" style={styles.input} value={customActivity} onChange={(event) => setCustomActivity(event.target.value)} />
-                </label>
-              )}
-              <button type="button" className="btn btn-secondary" onClick={() => addActivity(school)} disabled={!activityChoice || (activityChoice === "Other" && !customActivity.trim())}>
-                Add Activity
-              </button>
-            </div>
-          )}
           {renderTable(school, "activities")}
+          {renderTable(school, "careerGuidanceActivities")}
+          {renderTable(school, "industryInteractionActivities")}
+          {renderTable(school, "otherActivities")}
           {renderTable(school, "trainingActivities")}
           {renderTable(school, "industryCollaborations")}
         </section>

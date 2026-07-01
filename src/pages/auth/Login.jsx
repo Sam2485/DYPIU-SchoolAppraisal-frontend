@@ -200,7 +200,7 @@ export default function Login() {
 
         <div className="school-login-card" style={s.card}>
           <div className="school-login-left" style={s.left}>
-            <h1 style={s.uniName}>School Appraisal System</h1>
+            <h1 style={s.uniName}>Academic and Administrative Audit</h1>
             <h1 style={s.uniName}>
               D. Y. Patil International University, Akurdi, Pune, Maharashtra
             </h1>
