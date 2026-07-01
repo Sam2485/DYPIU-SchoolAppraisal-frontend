@@ -442,19 +442,7 @@ export default function AdministrativeAuditDashboard() {
       lastSavedAt: new Date().toISOString(),
     }));
 
-    await saveDraft(
-      {
-        ...buildSubmissionPayload({
-          auditType: "administrative",
-          values: nextFields,
-          tables: data.tables,
-          attachments: uniqueAttachments({ fields: nextFields, tables: data.tables }),
-        }),
-        sharedAdministrativeForm: true,
-        contributorPost: userPost,
-      },
-      { isUpdate },
-    );
+    await saveDraft(payloadForModules([activeModule], nextFields), { isUpdate });
   };
 
   const handleSubmitMyPart = async () => {
