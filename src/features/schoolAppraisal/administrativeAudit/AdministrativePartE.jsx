@@ -45,7 +45,6 @@ const COLLABORATION_COLUMNS = [
 const ACTIVITY_OPTIONS = [
   "Internship",
   "Training / Skill Development",
-  "Soft Skills",
   "Career Guidance",
   "Industry Interaction",
   "Other",
@@ -348,7 +347,7 @@ export default function AdministrativePartE({
           )}
           <button
             type="button"
-            className="btn btn-secondary"
+            className="btn btn-primary"
             onClick={() => setShowSchoolAdder((current) => !current)}
             disabled={!availableSchools.length}
           >

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getApiErrorMessage } from "../../../api/client";
-import { SIGN_OFF_FIELD, buildSubmissionPayload, deleteAttachment, fetchMyDraft, normalizeDraft, saveDraft, signOffProfileFromSession, submitDraft, uploadAttachments, withSubmitterSignOff, fetchAdministrativeStatus, submitAdministrativePart } from "../../../api/submissions";
+import { SIGN_OFF_FIELD, buildSubmissionPayload, deleteAttachment, fetchMyDraft, normalizeDraft, saveDraft, uploadAttachments, fetchAdministrativeStatus, submitAdministrativePart } from "../../../api/submissions";
 import universityLogo from "../../../assets/images/image.png";
 import AuditTable from "../components/AuditTable";
 import DateInput from "../components/DateInput";
@@ -34,6 +34,15 @@ const normalizePost = (value = "") => {
 };
 
 const moduleOwnerPost = (module) => normalizePost(module.owner);
+
+const ADMIN_STATUS_ROLES = [
+  { key: "registrar", label: "Registrar", post: "registrar" },
+  { key: "hr", label: "HR", post: "hr" },
+  { key: "deanStudentWelfare", label: "Dean Student Welfare", post: "dean-student-welfare" },
+  { key: "deanPlacement", label: "Dean Placement", post: "dean-placement" },
+];
+
+const statusRoleForPost = (post) => ADMIN_STATUS_ROLES.find((role) => role.post === post);
 
 const emptyRowFor = (columns, index) => {
   const row = columnsWithSerial(columns).reduce((value, column) => {
@@ -189,16 +198,28 @@ export default function AdministrativeAuditDashboard() {
     () => administrativeUserModules.find((module) => module.id === activeModuleId) || administrativeUserModules[0],
     [activeModuleId],
   );
+  const ownedModules = useMemo(
+    () => administrativeUserModules.filter((module) => module.id !== "submission-status" && moduleOwnerPost(module) === userPost),
+    [userPost],
+  );
   const activeModuleIndex = administrativeUserModules.findIndex((module) => module.id === activeModuleId);
   const isLastModule = activeModuleIndex === administrativeUserModules.length - 1;
+  const finalOwnedModule = ownedModules[ownedModules.length - 1];
   const canEditActiveModule = moduleOwnerPost(activeModule) === userPost;
   const readOnly = isSubmitted || contributionApproved || !canEditActiveModule;
-  const canApprove = isSubmissionConfirmed(submissionConfirmation);
+  const isFinalOwnedModule = canEditActiveModule && activeModule.id === finalOwnedModule?.id;
+  const canSubmitPart = isSubmissionConfirmed(submissionConfirmation);
+  const currentStatusRole = statusRoleForPost(userPost);
 
   const handleModuleChange = (moduleId) => {
     setReportMode(false);
     setActiveModuleId(moduleId);
     window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "smooth" }));
+  };
+
+  const updateSubmissionConfirmation = (value) => {
+    setSubmissionConfirmation(value);
+    setSubmitStatus("");
   };
 
   useEffect(() => {
@@ -394,7 +415,7 @@ export default function AdministrativeAuditDashboard() {
     navigate("/login", { replace: true });
   };
 
-  const storeAdministrativeSubmissionStatus = async ({ roleKey, submittedAt, confirmation }) => {
+  const storeAdministrativeSubmissionStatus = async ({ roleKey, submittedAt, confirmation, isUpdate = hasExistingSubmission }) => {
     const profile = getUserProfile();
     const nextFields = {
       ...data.fields,
@@ -429,14 +450,21 @@ export default function AdministrativeAuditDashboard() {
         sharedAdministrativeForm: true,
         contributorPost: userPost,
       },
-      { isUpdate: hasExistingSubmission },
+      { isUpdate },
     );
   };
 
-  const handleApprove = async () => {
+  const handleSubmitMyPart = async () => {
     if (isSubmitted || contributionApproved) return;
-    if (!canApprove) {
-      setSubmitStatus("Please confirm both declarations before approving.");
+    if (!canSubmitPart) {
+      setSubmitStatus("Please confirm both declarations before submitting your part.");
+      return;
+    }
+    if (!currentStatusRole) {
+      setSubmitStatus("Could not identify your administrative role for submission.");
+      return;
+    }
+    if (!window.confirm("Are you sure you want to submit your part of the Administrative Audit? This will lock your section from further edits.")) {
       return;
     }
 
@@ -444,32 +472,35 @@ export default function AdministrativeAuditDashboard() {
     setSubmitStatus("");
 
     try {
-      const signedFields = withSubmitterSignOff(data.fields, signOffProfileFromSession("administrative"));
-      const signedData = { ...data, fields: signedFields };
-      const ownedModules = administrativeUserModules.filter((module) => moduleOwnerPost(module) === userPost);
-      const { data: approvalResponse } = await submitDraft(
-        {
-          ...payloadForModules(ownedModules, signedFields),
-          action: "APPROVE_CONTRIBUTION",
-        },
-        { isUpdate: hasExistingSubmission },
-      );
+      const submittedAt = new Date().toISOString();
+      await saveDraft(currentPayload(), { isUpdate: hasExistingSubmission });
       setHasExistingSubmission(true);
+      await storeAdministrativeSubmissionStatus({
+        roleKey: currentStatusRole.key,
+        submittedAt,
+        confirmation: submissionConfirmation,
+        isUpdate: true,
+      });
+      const { data: response } = await submitAdministrativePart(academicYear);
+      const updatedDraft = normalizeDraft(response);
+
       setContributionApproved(true);
-      const overallStatus = String(
-        approvalResponse?.data?.overallStatus ||
-        approvalResponse?.overallStatus ||
-        approvalResponse?.data?.status ||
-        approvalResponse?.status ||
-        ""
-      ).toLowerCase().replaceAll("_", "-");
-      if (["submitted", "under-review", "auditor-completed", "approved"].includes(overallStatus)) {
-        setIsSubmitted(true);
-      }
-      setData({ ...signedData, submittedAt: new Date().toISOString(), lastSavedAt: new Date().toISOString() });
-      setSubmitStatus("Your Administrative Audit sections were approved. The shared form will move to IQAC after all four authorities approve.");
+      setIsSubmitted(updatedDraft.isSubmitted);
+      setData((current) => ({
+        ...current,
+        fields: {
+          ...current.fields,
+          ...updatedDraft.values,
+          [ADMIN_SUBMISSION_STATUS_FIELD]: updatedDraft.values[ADMIN_SUBMISSION_STATUS_FIELD] || current.fields[ADMIN_SUBMISSION_STATUS_FIELD],
+        },
+        tables: ensureDefaultTableRows({ ...current.tables, ...updatedDraft.tables }),
+        attachments: updatedDraft.attachments.length ? updatedDraft.attachments : current.attachments,
+        lastSavedAt: new Date().toISOString(),
+      }));
+      setSubmissionConfirmation(emptySubmissionConfirmation);
+      setSubmitStatus("Your section has been submitted successfully.");
     } catch (error) {
-      setSubmitStatus(getApiErrorMessage(error, "Could not approve your Administrative Audit sections."));
+      setSubmitStatus(getApiErrorMessage(error, "Could not submit your Administrative Audit section."));
     } finally {
       setSubmitting(false);
     }
@@ -560,26 +591,8 @@ export default function AdministrativeAuditDashboard() {
 
             {activeModuleId === "submission-status" ? (
               <SubmissionStatusPanel
-                userPost={userPost}
                 academicYear={academicYear}
                 storedSubmissionStatus={storedAdministrativeStatusFor(data.fields)}
-                onStoreSubmissionStatus={storeAdministrativeSubmissionStatus}
-                onSubmitted={(updatedDraft) => {
-                  setData((current) => ({
-                    ...current,
-                    fields: {
-                      ...updatedDraft.values,
-                      [ADMIN_SUBMISSION_STATUS_FIELD]: updatedDraft.values[ADMIN_SUBMISSION_STATUS_FIELD] || current.fields[ADMIN_SUBMISSION_STATUS_FIELD],
-                    },
-                    tables: ensureDefaultTableRows(updatedDraft.tables),
-                    attachments: updatedDraft.attachments,
-                    lastSavedAt: new Date().toISOString(),
-                  }));
-                  setHasExistingSubmission(updatedDraft.exists);
-                  setIsSubmitted(updatedDraft.isSubmitted);
-                  const contributionStatus = String(updatedDraft.administrativeProgress?.[userPost] || "").toLowerCase();
-                  setContributionApproved(["approved", "submitted"].includes(contributionStatus));
-                }}
               />
             ) : (
               moduleBlocksFor(activeModule).map((block, index) => {
@@ -629,12 +642,14 @@ export default function AdministrativeAuditDashboard() {
               })
             )}
 
-            {isLastModule && activeModuleId !== "submission-status" && !isSubmitted && !contributionApproved && (
-              <SubmissionConfirmation
-                value={submissionConfirmation}
-                onChange={setSubmissionConfirmation}
-                disabled={submitting}
-              />
+            {isFinalOwnedModule && !isSubmitted && !contributionApproved && (
+              <div style={styles.submissionConfirmationWrap}>
+                <SubmissionConfirmation
+                  value={submissionConfirmation}
+                  onChange={updateSubmissionConfirmation}
+                  disabled={submitting}
+                />
+              </div>
             )}
 
             <div style={styles.sectionFooter}>
@@ -649,25 +664,13 @@ export default function AdministrativeAuditDashboard() {
                 >
                   Generate Report
                 </button>
-              ) : isLastModule ? (
-                <>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={() => {
-                      setReportMode(true);
-                      setPrintReportAfterRender(true);
-                    }}
-                  >
-                    Generate Report
+              ) : isFinalOwnedModule ? (
+                !isSubmitted && !contributionApproved ? (
+                  <button type="button" className="btn btn-primary" onClick={handleSubmitMyPart} disabled={submitting || !canSubmitPart} aria-busy={submitting}>
+                    {submitting && <InlineSpinner label="Submitting section" />}
+                    {submitting ? "Submitting..." : "Submit My Part"}
                   </button>
-                  {!isSubmitted && !contributionApproved && (
-                    <button type="button" className="btn btn-primary" onClick={handleApprove} disabled={submitting || !canApprove} aria-busy={submitting}>
-                      {submitting && <InlineSpinner label="Approving sections" />}
-                      {submitting ? "Approving..." : "Approve"}
-                    </button>
-                  )}
-                </>
+                ) : null
               ) : (
                 <button type="button" className="btn btn-primary" onClick={saveAndGoNext} disabled={readOnly || savingDraft || loadingDraft} aria-busy={savingDraft}>
                   {savingDraft && <InlineSpinner label="Saving section" />}
@@ -675,7 +678,7 @@ export default function AdministrativeAuditDashboard() {
                 </button>
               )}
             </div>
-            {isLastModule && submitStatus && <div style={styles.submitStatus}>{submitStatus}</div>}
+            {(isLastModule || isFinalOwnedModule) && submitStatus && <div style={styles.submitStatus}>{submitStatus}</div>}
           </section>}
         </main>
 
@@ -1197,6 +1200,9 @@ const styles = {
     border: 0,
     background: "transparent",
   },
+  submissionConfirmationWrap: {
+    marginTop: 28,
+  },
   submitStatus: {
     border: "1px solid #bbf7d0",
     borderRadius: 8,
@@ -1259,7 +1265,7 @@ const styles = {
   },
 };
 
-function SubmissionStatusPanel({ userPost, academicYear, storedSubmissionStatus = {}, onStoreSubmissionStatus, onSubmitted }) {
+function SubmissionStatusPanel({ academicYear, storedSubmissionStatus = {} }) {
   const [statusMap, setStatusMap] = useState({
     registrar: { submitted: false, submittedAt: null, name: null, email: null },
     hr: { submitted: false, submittedAt: null, name: null, email: null },
@@ -1267,25 +1273,7 @@ function SubmissionStatusPanel({ userPost, academicYear, storedSubmissionStatus 
     deanPlacement: { submitted: false, submittedAt: null, name: null, email: null }
   });
   const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-  const [submissionConfirmation, setSubmissionConfirmation] = useState(emptySubmissionConfirmation);
   const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
-
-  const roles = [
-    { key: "registrar", label: "Registrar", post: "registrar" },
-    { key: "hr", label: "HR", post: "hr" },
-    { key: "deanStudentWelfare", label: "Dean Student Welfare", post: "dean-student-welfare" },
-    { key: "deanPlacement", label: "Dean Placement", post: "dean-placement" }
-  ];
-  const currentRole = roles.find((role) => role.post === userPost);
-  const currentSubmissionInfo = currentRole ? statusMap[currentRole.key] : null;
-  const needsSubmissionConfirmation = Boolean(currentRole && !currentSubmissionInfo?.submitted);
-  const canSubmitPart = !needsSubmissionConfirmation || isSubmissionConfirmed(submissionConfirmation);
-  const updateSubmissionConfirmation = (value) => {
-    setSubmissionConfirmation(value);
-    setError("");
-  };
 
   useEffect(() => {
     let isActive = true;
@@ -1317,59 +1305,6 @@ function SubmissionStatusPanel({ userPost, academicYear, storedSubmissionStatus 
     };
   }, [academicYear]);
 
-  const handleSubmitPart = async () => {
-    if (!canSubmitPart) {
-      setError("Please confirm both declarations before submitting.");
-      return;
-    }
-
-    if (!window.confirm("Are you sure you want to submit your part of the Administrative Audit? This will lock your section from further edits.")) {
-      return;
-    }
-    setSubmitting(true);
-    setError("");
-    setSuccess("");
-
-    try {
-      const submittedAt = new Date().toISOString();
-      const { data: res } = await submitAdministrativePart(academicYear);
-      if (currentRole) {
-        await onStoreSubmissionStatus?.({
-          roleKey: currentRole.key,
-          submittedAt,
-          confirmation: submissionConfirmation,
-        });
-      }
-      setSuccess("Your section has been submitted successfully!");
-      const { data: updatedStatus } = await fetchAdministrativeStatus(academicYear);
-      if (updatedStatus) {
-        setStatusMap((current) => {
-          const nextStatus = {
-            registrar: updatedStatus.registrar || current.registrar,
-            hr: updatedStatus.hr || current.hr,
-            deanStudentWelfare: updatedStatus.deanStudentWelfare || current.deanStudentWelfare,
-            deanPlacement: updatedStatus.deanPlacement || current.deanPlacement
-          };
-
-          if (currentRole && nextStatus[currentRole.key]?.submitted) {
-            nextStatus[currentRole.key] = {
-              ...nextStatus[currentRole.key],
-              submittedAt: storedSubmissionStatus[currentRole.key]?.submittedAt || nextStatus[currentRole.key]?.submittedAt || submittedAt,
-            };
-          }
-
-          return nextStatus;
-        });
-      }
-      const normalized = normalizeDraft(res);
-      onSubmitted(normalized);
-    } catch (err) {
-      setError(getApiErrorMessage(err, "Failed to submit your section."));
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
   if (loading) {
     return <LoadingState label="Loading status..." compact />;
   }
@@ -1382,27 +1317,15 @@ function SubmissionStatusPanel({ userPost, academicYear, storedSubmissionStatus 
       </p>
 
       {error && <div style={statusStyles.error}>{error}</div>}
-      {success && <div style={statusStyles.success}>{success}</div>}
-
-      {needsSubmissionConfirmation && (
-        <div style={statusStyles.confirmationWrap}>
-          <SubmissionConfirmation
-            value={submissionConfirmation}
-            onChange={updateSubmissionConfirmation}
-            disabled={submitting}
-          />
-        </div>
-      )}
 
       <div style={statusStyles.table}>
         <div style={statusStyles.tableHeader}>
           <div style={statusStyles.colRole}>Authority / Role</div>
           <div style={statusStyles.colStatus}>Status</div>
           <div style={statusStyles.colDetails}>Submission Details</div>
-          <div style={statusStyles.colAction}>Action</div>
         </div>
 
-        {roles.map((r) => {
+        {ADMIN_STATUS_ROLES.map((r) => {
           const info = statusMap[r.key] || { submitted: false, submittedAt: null, name: null, email: null };
           const storedInfo = storedSubmissionStatus[r.key] || {};
           const mergedInfo = {
@@ -1412,8 +1335,6 @@ function SubmissionStatusPanel({ userPost, academicYear, storedSubmissionStatus 
             name: storedInfo.name || info.name,
             email: storedInfo.email || info.email,
           };
-          const isCurrentUser = r.post === userPost;
-          const isActionDisabled = mergedInfo.submitted || submitting || (isCurrentUser && !canSubmitPart);
           const formattedDate = formatSubmittedDateTime(mergedInfo.submittedAt);
 
           return (
@@ -1434,19 +1355,6 @@ function SubmissionStatusPanel({ userPost, academicYear, storedSubmissionStatus 
                   </div>
                 ) : (
                   <span style={statusStyles.pendingText}>Waiting for submission</span>
-                )}
-              </div>
-              <div style={statusStyles.colAction}>
-                {isCurrentUser && (
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    onClick={handleSubmitPart}
-                    disabled={isActionDisabled}
-                    style={isActionDisabled ? statusStyles.disabledBtn : statusStyles.submitBtn}
-                  >
-                    {submitting ? "Submitting..." : info.submitted ? "Submitted" : "Submit My Part"}
-                  </button>
                 )}
               </div>
             </div>
