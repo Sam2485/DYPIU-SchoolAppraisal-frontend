@@ -28,6 +28,7 @@ import AdministrativePartE from "../administrativeAudit/AdministrativePartE";
 import { academicAudit2025Schema } from "../formSchemas";
 import UserManagementPanel from "../userManagement/UserManagementPanel";
 import { ADMINISTRATIVE_POSTS, SCHOOL_OPTIONS, schoolGroupFor } from "../userManagement/userManagementConfig";
+import BackupRestorePanel from "./BackupRestorePanel";
 import { formatDateDDMMYYYY } from "../../../utils/dateFormat";
 
 const REVIEW_NAV_ITEMS = [
@@ -58,6 +59,13 @@ const START_NEXT_YEAR_NAV_ITEM = {
   caption: "Create blank yearly forms",
   group: "audit-cycle",
   groupLabel: "Audit Cycle",
+};
+const BACKUP_RESTORE_NAV_ITEM = {
+  id: "backup-restore",
+  title: "Backup & Restore",
+  caption: "Database & Uploads backup",
+  group: "system-admin",
+  groupLabel: "System Administration",
 };
 
 const REVIEW_ROLE_CONFIG = {
@@ -530,12 +538,17 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
 
     return canManageUsers ? [...REVIEW_NAV_ITEMS, USER_MANAGEMENT_NAV_ITEM] : REVIEW_NAV_ITEMS;
   }, [canManageUsers, isAuditor, profile.category]);
-  const standaloneNavigationItems = useMemo(
-    () => !isAuditor && ["iqac", "vice-chancellor"].includes(role)
-      ? [AUDITOR_FINAL_REVIEW_NAV_ITEM, PREVIOUS_REPORTS_NAV_ITEM, START_NEXT_YEAR_NAV_ITEM]
-      : [],
-    [isAuditor, role],
-  );
+  const standaloneNavigationItems = useMemo(() => {
+    if (isAuditor) return [];
+    const items = [];
+    if (["iqac", "vice-chancellor"].includes(role)) {
+      items.push(AUDITOR_FINAL_REVIEW_NAV_ITEM, PREVIOUS_REPORTS_NAV_ITEM, START_NEXT_YEAR_NAV_ITEM);
+    }
+    if (role === "iqac") {
+      items.push(BACKUP_RESTORE_NAV_ITEM);
+    }
+    return items;
+  }, [isAuditor, role]);
   const visibleActiveView = !canManageUsers && activeView === "user-management" ? "overview" : activeView;
   const auditorReviewedSubmissions = useMemo(
     () => allSubmissions.filter((submission) => isAuditorCompleted(submission) && !isApprovedReport(submission)),
@@ -998,6 +1011,8 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
               onDownload={handleDownloadAttachments}
               downloadingAttachmentsId={downloadingAttachmentsId}
             />
+          ) : visibleActiveView === "backup-restore" ? (
+            <BackupRestorePanel />
           ) : null}
 
           {error && <div className="review-error-notice" style={styles.errorNotice}>{error}</div>}
