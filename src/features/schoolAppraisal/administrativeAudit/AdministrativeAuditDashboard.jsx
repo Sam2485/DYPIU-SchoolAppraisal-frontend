@@ -191,6 +191,7 @@ export default function AdministrativeAuditDashboard() {
   const [status, setStatus] = useState("");
   const [loadingDraft, setLoadingDraft] = useState(true);
   const [savingDraft, setSavingDraft] = useState(false);
+  const [savingDraftAction, setSavingDraftAction] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submissionConfirmation, setSubmissionConfirmation] = useState(emptySubmissionConfirmation);
   const [hasExistingSubmission, setHasExistingSubmission] = useState(false);
@@ -387,9 +388,32 @@ export default function AdministrativeAuditDashboard() {
 
   const currentPayload = () => payloadForModules([activeModule]);
 
+  const saveCurrentSection = async () => {
+    if (readOnly) return;
+    setSavingDraft(true);
+    setSavingDraftAction("draft");
+    setStatus("");
+
+    try {
+      setData((current) => ({
+        ...current,
+        lastSavedAt: new Date().toISOString(),
+      }));
+      await saveDraft(currentPayload(), { isUpdate: hasExistingSubmission });
+      setHasExistingSubmission(true);
+      setStatus(`Section ${activeModule.number || activeModule.title} draft saved successfully.`);
+    } catch (error) {
+      setStatus(getApiErrorMessage(error, "Could not save draft."));
+    } finally {
+      setSavingDraft(false);
+      setSavingDraftAction("");
+    }
+  };
+
   const saveAndGoNext = async () => {
     if (readOnly) return;
     setSavingDraft(true);
+    setSavingDraftAction("next");
     setStatus("");
     const nextData = { ...data, lastSavedAt: new Date().toISOString() };
 
@@ -411,6 +435,7 @@ export default function AdministrativeAuditDashboard() {
       setStatus(getApiErrorMessage(error, "Could not save draft."));
     } finally {
       setSavingDraft(false);
+      setSavingDraftAction("");
     }
   };
 
@@ -672,16 +697,28 @@ export default function AdministrativeAuditDashboard() {
                 </button>
               ) : isFinalOwnedModule ? (
                 !isSubmitted && !contributionApproved ? (
-                  <button type="button" className="btn btn-primary" onClick={handleSubmitMyPart} disabled={submitting || !canSubmitPart} aria-busy={submitting}>
-                    {submitting && <InlineSpinner label="Submitting section" />}
-                    {submitting ? "Submitting..." : "Submit My Part"}
-                  </button>
+                  <>
+                    <button type="button" className="btn btn-secondary" onClick={saveCurrentSection} disabled={readOnly || savingDraft || loadingDraft || submitting} aria-busy={savingDraft}>
+                      {savingDraftAction === "draft" && <InlineSpinner label="Saving section" />}
+                      {savingDraftAction === "draft" ? "Saving..." : "Save Draft"}
+                    </button>
+                    <button type="button" className="btn btn-primary" onClick={handleSubmitMyPart} disabled={submitting || savingDraft || !canSubmitPart} aria-busy={submitting}>
+                      {submitting && <InlineSpinner label="Submitting section" />}
+                      {submitting ? "Submitting..." : "Submit My Part"}
+                    </button>
+                  </>
                 ) : null
               ) : (
-                <button type="button" className="btn btn-primary" onClick={saveAndGoNext} disabled={readOnly || savingDraft || loadingDraft} aria-busy={savingDraft}>
-                  {savingDraft && <InlineSpinner label="Saving section" />}
-                  {savingDraft ? "Saving..." : "Save & Next"}
-                </button>
+                <>
+                  <button type="button" className="btn btn-secondary" onClick={saveCurrentSection} disabled={readOnly || savingDraft || loadingDraft} aria-busy={savingDraft}>
+                    {savingDraftAction === "draft" && <InlineSpinner label="Saving section" />}
+                    {savingDraftAction === "draft" ? "Saving..." : "Save Draft"}
+                  </button>
+                  <button type="button" className="btn btn-primary" onClick={saveAndGoNext} disabled={readOnly || savingDraft || loadingDraft} aria-busy={savingDraft}>
+                    {savingDraftAction === "next" && <InlineSpinner label="Saving section" />}
+                    {savingDraftAction === "next" ? "Saving..." : "Save & Next"}
+                  </button>
+                </>
               )}
             </div>
             {(isLastModule || isFinalOwnedModule) && submitStatus && <div style={styles.submitStatus}>{submitStatus}</div>}
