@@ -55,3 +55,11 @@ gcloud run services update school-appraisal-frontend `
   --region asia-south1 `
   --set-env-vars VITE_API_BASE_URL=https://YOUR-BACKEND-URL
 ```
+
+## 📎 Attachment URL Resolution on VM / Local Deployments
+
+To allow seamless transitions between GCP (which uses Google Cloud Storage) and VM deployments (which use local storage) without modifying the production database, the frontend utility `getAttachmentUrl` dynamically resolves GCS URLs:
+- **Detection**: If the application is accessed via a local or private VM hostname (`localhost`, `127.0.0.1`, `10.*`, `192.168.*`, or `172.*`), the client-side utility detects that it is in a VM/development environment.
+- **Translation**: It automatically translates any absolute Google Cloud Storage URLs (`https://storage.googleapis.com/...`) into relative local path equivalents (`/uploads/users/...`).
+- **Resolution**: The translated relative path is then resolved using the VM's active `VITE_API_BASE_URL` configuration, loading the file directly from the VM's `/uploads` directory served by the backend.
+- **Safety**: In the production GCP environment, the URL is returned unmodified, ensuring no disruption to live users.
