@@ -18,6 +18,12 @@ server {
         return 200 'globalThis.__APP_CONFIG__ = { VITE_API_BASE_URL: "${VITE_API_BASE_URL}" };';
     }
 
+    location = /AAA/env-config.js {
+        default_type application/javascript;
+        add_header Cache-Control "no-store, no-cache, must-revalidate";
+        return 200 'globalThis.__APP_CONFIG__ = { VITE_API_BASE_URL: "${VITE_API_BASE_URL}" };';
+    }
+
     location ^~ /api/ {
         client_max_body_size 0;
         proxy_pass ${BACKEND_URL};
@@ -33,6 +39,11 @@ server {
     }
 
     location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    location /AAA/ {
+        alias /usr/share/nginx/html/;
         try_files $uri $uri/ /index.html;
     }
 

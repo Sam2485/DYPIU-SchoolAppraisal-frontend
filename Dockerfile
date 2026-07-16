@@ -4,9 +4,9 @@ WORKDIR /app
 
 COPY package.json package-lock.json ./
 RUN npm install --no-audit --no-fund
-
+ARG MODE=production
 COPY . .
-RUN npm run build
+RUN npm run build -- --mode ${MODE}
 
 FROM nginx:1.30.3-alpine
 

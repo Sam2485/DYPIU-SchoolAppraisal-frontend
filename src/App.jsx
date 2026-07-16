@@ -21,8 +21,9 @@ function ProtectedRoute({ role, children }) {
 }
 
 export default function App() {
+  const basename = import.meta.env.MODE === 'vm' ? '/AAA' : '';
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={basename}>
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/reset-password" element={<ResetPassword />} />

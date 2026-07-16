@@ -11,9 +11,7 @@ export const getAttachmentUrl = (url) => {
   const isLocalOrVm = 
     window.location.hostname === "localhost" || 
     window.location.hostname === "127.0.0.1" || 
-    window.location.hostname.startsWith("10.") || 
-    window.location.hostname.startsWith("192.168.") || 
-    window.location.hostname.startsWith("172.");
+    /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(window.location.hostname);
 
   if (isLocalOrVm && typeof resolvedUrl === "string" && resolvedUrl.startsWith("https://storage.googleapis.com/")) {
     const match = resolvedUrl.match(/https:\/\/storage\.googleapis\.com\/[^\/]+\/(.+)/);
