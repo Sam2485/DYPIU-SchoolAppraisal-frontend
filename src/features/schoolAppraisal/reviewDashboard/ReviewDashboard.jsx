@@ -378,6 +378,7 @@ const matchesAuditorResponsibility = (submission, profile) => {
 const matchesAuditorSession = (submission, profile) => {
   const userId = sessionStorage.getItem("userId") || "";
   const email = normalizeAuditAssignment(profile.email || sessionStorage.getItem("email") || sessionStorage.getItem("username") || "");
+  const auditorType = normalizeUserRole(profile.auditorType || auditorTypeFromRole(profile.role));
   const forwardedId = String(submission.forwardedToAuditorId || "");
   const forwardedEmail = normalizeAuditAssignment(submission.forwardedToAuditorEmail || "");
   const forwardedIds = valueList(submission.forwardedToAuditorIds).map(String);
@@ -398,6 +399,9 @@ const matchesAuditorSession = (submission, profile) => {
   );
 
   if (hasDirectAssignment) return directMatch;
+  if (!hasForwardingMetadata && submission.status === "submitted" && auditorType === "internal") {
+    return matchesAuditorResponsibility(submission, profile);
+  }
   return hasForwardingMetadata && matchesAuditorResponsibility(submission, profile);
 };
 
@@ -511,13 +515,14 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
   const [showNextYearModal, setShowNextYearModal] = useState(false);
   const [startingAcademicYear, setStartingAcademicYear] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [auditorProfile, setAuditorProfile] = useState(null);
   const canManageUsers = role === "iqac";
   const roleConfig = isAuditor ? REVIEW_ROLE_CONFIG.auditor : REVIEW_ROLE_CONFIG[role] || REVIEW_ROLE_CONFIG.iqac;
-  const profile = useMemo(() => ({
+  const sessionProfile = useMemo(() => ({
     id: sessionStorage.getItem("userId") || "",
     name: sessionStorage.getItem("name") || roleConfig.roleTitle,
     designation: sessionStorage.getItem("designation") || roleConfig.roleTitle,
-    school: sessionStorage.getItem("school") || "D Y Patil International University",
+    school: sessionStorage.getItem("school") || (isAuditor ? "" : "D Y Patil International University"),
     post: sessionStorage.getItem("post") || "",
     administrativePosts: valueList(sessionStorage.getItem("administrativePosts")),
     category: sessionStorage.getItem("category") || auditCategoryFromRole(role),
@@ -525,7 +530,13 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
     auditorRole: sessionStorage.getItem("auditorRole") || role,
     email: sessionStorage.getItem("email") || sessionStorage.getItem("username") || "",
     role,
-  }), [role, roleConfig.roleTitle]);
+  }), [isAuditor, role, roleConfig.roleTitle]);
+  const profile = useMemo(() => ({
+    ...sessionProfile,
+    ...(auditorProfile || {}),
+    role,
+    auditorRole: auditorProfile?.auditorRole || sessionProfile.auditorRole,
+  }), [auditorProfile, role, sessionProfile]);
 
   const allSubmissions = useMemo(() => [...submissions.academic, ...submissions.administrative], [submissions]);
   const metrics = useMemo(() => buildMetrics(allSubmissions), [allSubmissions]);
@@ -576,6 +587,41 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
     academic: isAuditor ? submissions.academic : submissions.academic.filter((submission) => !isAuditorCompleted(submission)),
     administrative: isAuditor ? submissions.administrative : submissions.administrative.filter((submission) => !isAuditorCompleted(submission)),
   }), [isAuditor, submissions]);
+
+  useEffect(() => {
+    if (!isAuditor) return undefined;
+
+    let isActive = true;
+    const loadAuditorProfile = async () => {
+      try {
+        const { data } = await fetchUsers();
+        const sessionId = String(sessionProfile.id || "");
+        const sessionEmail = normalizeAuditAssignment(sessionProfile.email || "");
+        const matchedUser = userList(data)
+          .map(normalizeAuditor)
+          .find((user) =>
+            (sessionId && String(user.id) === sessionId) ||
+            (sessionEmail && normalizeAuditAssignment(user.email) === sessionEmail)
+          );
+
+        if (isActive && matchedUser) {
+          setAuditorProfile({
+            ...matchedUser,
+            role,
+            auditorRole: matchedUser.role || sessionProfile.auditorRole,
+          });
+        }
+      } catch {
+        if (isActive) setAuditorProfile(null);
+      }
+    };
+
+    loadAuditorProfile();
+
+    return () => {
+      isActive = false;
+    };
+  }, [isAuditor, role, sessionProfile.auditorRole, sessionProfile.email, sessionProfile.id]);
 
   useEffect(() => {
     let isActive = true;
