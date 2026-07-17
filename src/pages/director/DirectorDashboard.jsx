@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import AuditForm from "../../features/schoolAppraisal/components/AuditForm";
 import AppSidebar from "../../features/schoolAppraisal/components/AppSidebar";
 import { academicAudit2025Schema } from "../../features/schoolAppraisal/formSchemas";
+import { scrollPageToTop } from "../../utils/scrollToTop";
 
 const directorAuditSchema = {
   ...academicAudit2025Schema,
@@ -42,7 +43,7 @@ export default function DirectorDashboard() {
         onChange={(sectionId) => {
           setReportMode(false);
           setActiveSectionId(sectionId);
-          window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "smooth" }));
+          scrollPageToTop();
         }}
         profile={profile}
         onLogout={() => setShowLogoutModal(true)}

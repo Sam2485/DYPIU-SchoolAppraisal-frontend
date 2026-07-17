@@ -14,6 +14,7 @@ import AdministrativePartE from "./AdministrativePartE";
 import AppSidebar from "../components/AppSidebar";
 import { administrativeAuditMeta, administrativeAuditModules } from "./administrativeAuditConfig";
 import { getAttachmentUrl } from "../../../utils/attachment";
+import { scrollPageToTop } from "../../../utils/scrollToTop";
 
 const administrativeUserModules = [
   ...administrativeAuditModules.filter((module) => module.id !== "section-f-observations-recommendations"),
@@ -219,7 +220,7 @@ export default function AdministrativeAuditDashboard() {
   const handleModuleChange = (moduleId) => {
     setReportMode(false);
     setActiveModuleId(moduleId);
-    window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "smooth" }));
+    scrollPageToTop();
   };
 
   const updateSubmissionConfirmation = (value) => {
@@ -440,7 +441,7 @@ export default function AdministrativeAuditDashboard() {
 
       if (nextModuleId && nextModuleId !== activeModuleId) {
         setActiveModuleId(nextModuleId);
-        window.scrollTo({ top: 0, behavior: "smooth" });
+        scrollPageToTop();
       }
     } catch (error) {
       setStatus(getApiErrorMessage(error, "Could not save draft."));

@@ -8,6 +8,7 @@ import { InlineSpinner, LoadingState, SkeletonList } from "./LoadingState";
 import SubmissionConfirmation from "./SubmissionConfirmation";
 import { emptySubmissionConfirmation, isSubmissionConfirmed } from "./submissionConfirmationState";
 import { columnsWithSerial, serialColumnFor } from "./tableHelpers";
+import { scrollPageToTop } from "../../../utils/scrollToTop";
 
 const emptyRowFor = (columns) =>
   columnsWithSerial(columns).reduce((row, column) => {
@@ -189,7 +190,7 @@ export default function AuditForm({ schema, academicYear = schema.academicYear, 
 
       if (nextSectionId && nextSectionId !== activeSectionId) {
         onSectionChange?.(nextSectionId);
-        window.scrollTo({ top: 0, behavior: "smooth" });
+        scrollPageToTop();
       }
     } catch (error) {
       setStatus(getApiErrorMessage(error, "Could not save draft."));

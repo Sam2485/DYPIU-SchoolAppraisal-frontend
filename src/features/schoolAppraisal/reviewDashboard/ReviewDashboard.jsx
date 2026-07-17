@@ -31,6 +31,7 @@ import { ADMINISTRATIVE_POSTS, SCHOOL_OPTIONS, schoolGroupFor } from "../userMan
 import BackupRestorePanel from "./BackupRestorePanel";
 import { formatDateDDMMYYYY } from "../../../utils/dateFormat";
 import { getAttachmentUrl } from "../../../utils/attachment";
+import { scrollPageToTop } from "../../../utils/scrollToTop";
 
 const REVIEW_NAV_ITEMS = [
   { id: "overview", title: "Overview" },
@@ -1602,8 +1603,18 @@ function FullFormReview({
   const activeSectionIsAuditorOwned = activeSection ? isAuditorSection(activeSection, submission.auditType) : false;
   const isLastSection = activeSectionIndex === sections.length - 1;
   const hasRemarks = Boolean(submission.remarks.trim());
-  const goToPreviousSection = () => setActiveSectionIndex((index) => Math.max(0, index - 1));
-  const goToNextSection = () => setActiveSectionIndex((index) => Math.min(sections.length - 1, index + 1));
+  const goToSection = (sectionIndex) => {
+    setActiveSectionIndex(sectionIndex);
+    scrollPageToTop();
+  };
+  const goToPreviousSection = () => {
+    setActiveSectionIndex((index) => Math.max(0, index - 1));
+    scrollPageToTop();
+  };
+  const goToNextSection = () => {
+    setActiveSectionIndex((index) => Math.min(sections.length - 1, index + 1));
+    scrollPageToTop();
+  };
   const handleAuditorFieldChange = (fieldId, value) => {
     setDraftValues((current) => ({ ...current, [fieldId]: value }));
   };
@@ -1677,7 +1688,7 @@ function FullFormReview({
       <SectionReviewNav
         sections={sections}
         activeIndex={activeSectionIndex}
-        onChange={setActiveSectionIndex}
+        onChange={goToSection}
       />
 
       {auditorReviewReadOnly && (
@@ -1943,7 +1954,7 @@ function EditableFieldGrid({ fields, values, onFieldChange }) {
         const controlStyle = field.type === "textarea" ? styles.editableTextarea : styles.editableInput;
 
         return (
-          <label key={field.id} style={styles.readOnlyField}>
+          <label key={field.id} style={field.type === "textarea" ? styles.readOnlyWideField : styles.readOnlyField}>
             <span style={styles.readOnlyLabel}>{field.label}</span>
             {field.type === "textarea" ? (
               <textarea
@@ -1991,7 +2002,7 @@ function ReadOnlyFieldGrid({ fields, values }) {
         }
 
         return (
-          <div key={field.id} style={styles.readOnlyField}>
+          <div key={field.id} style={field.type === "textarea" ? styles.readOnlyWideField : styles.readOnlyField}>
             <div style={styles.readOnlyLabel}>{field.label}</div>
             <div style={styles.readOnlyValue}>{renderValue(values[field.id])}</div>
           </div>
@@ -3584,9 +3595,17 @@ const styles = {
     lineHeight: 1.35,
   },
   readOnlyField: {
+    minWidth: 0,
     display: "flex",
     flexDirection: "column",
     gap: 6,
+  },
+  readOnlyWideField: {
+    minWidth: 0,
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+    gridColumn: "1 / -1",
   },
   readOnlyLabel: {
     color: "#334155",
@@ -3605,6 +3624,8 @@ const styles = {
     background: "#fbfcfe",
     fontSize: 12.5,
     whiteSpace: "pre-wrap",
+    overflowWrap: "anywhere",
+    wordBreak: "break-word",
     lineHeight: 1.45,
   },
   editableInput: {
