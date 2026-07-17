@@ -465,6 +465,7 @@ export const academicAudit2025Schema = {
       fields: [
         { id: "auditObservations", label: "Observations of the Academic Audit Team", type: "textarea" },
         { id: "auditRecommendations", label: "Recommendations of the Audit Team", type: "textarea" },
+        { id: "auditDocumentation", label: "Upload Documentation", type: "file" },
       ],
     },
   ],

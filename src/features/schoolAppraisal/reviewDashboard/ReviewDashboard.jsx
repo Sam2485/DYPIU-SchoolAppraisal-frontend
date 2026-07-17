@@ -14,6 +14,8 @@ import {
   reviewSubmission,
   startNextAcademicYear,
   updateSubmissionById,
+  uploadAttachments,
+  deleteAttachment,
   withApproverSignOff,
 } from "../../../api/submissions";
 import { fetchUsers } from "../../../api/users";
@@ -177,6 +179,22 @@ const isAttachmentValue = (value) =>
   typeof value === "object" &&
   !Array.isArray(value) &&
   (value.url || value.publicUrl || value.downloadUrl || value.name || value.fileName);
+const attachmentKeyFor = (attachment = {}) =>
+  attachment.url || attachment.publicUrl || attachment.downloadUrl || attachment.fileName || attachment.filename || attachment.name || "";
+const uniqueAttachments = (attachments = []) => {
+  const seen = new Set();
+  return attachments.filter((attachment) => {
+    const key = attachmentKeyFor(attachment);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+const attachmentsFromValues = (values = {}) =>
+  Object.values(values).flatMap((value) => {
+    if (Array.isArray(value)) return value.filter(isAttachmentValue);
+    return isAttachmentValue(value) ? [value] : [];
+  });
 
 const blocksFor = (section) =>
   section.blocks || [
@@ -378,6 +396,7 @@ const matchesAuditorResponsibility = (submission, profile) => {
 const matchesAuditorSession = (submission, profile) => {
   const userId = sessionStorage.getItem("userId") || "";
   const email = normalizeAuditAssignment(profile.email || sessionStorage.getItem("email") || sessionStorage.getItem("username") || "");
+  const auditorType = normalizeUserRole(profile.auditorType || auditorTypeFromRole(profile.role));
   const forwardedId = String(submission.forwardedToAuditorId || "");
   const forwardedEmail = normalizeAuditAssignment(submission.forwardedToAuditorEmail || "");
   const forwardedIds = valueList(submission.forwardedToAuditorIds).map(String);
@@ -398,6 +417,9 @@ const matchesAuditorSession = (submission, profile) => {
   );
 
   if (hasDirectAssignment) return directMatch;
+  if (!hasForwardingMetadata && submission.status === "submitted" && auditorType === "internal") {
+    return matchesAuditorResponsibility(submission, profile);
+  }
   return hasForwardingMetadata && matchesAuditorResponsibility(submission, profile);
 };
 
@@ -511,13 +533,14 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
   const [showNextYearModal, setShowNextYearModal] = useState(false);
   const [startingAcademicYear, setStartingAcademicYear] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [auditorProfile, setAuditorProfile] = useState(null);
   const canManageUsers = role === "iqac";
   const roleConfig = isAuditor ? REVIEW_ROLE_CONFIG.auditor : REVIEW_ROLE_CONFIG[role] || REVIEW_ROLE_CONFIG.iqac;
-  const profile = useMemo(() => ({
+  const sessionProfile = useMemo(() => ({
     id: sessionStorage.getItem("userId") || "",
     name: sessionStorage.getItem("name") || roleConfig.roleTitle,
     designation: sessionStorage.getItem("designation") || roleConfig.roleTitle,
-    school: sessionStorage.getItem("school") || "D Y Patil International University",
+    school: sessionStorage.getItem("school") || (isAuditor ? "" : "D Y Patil International University"),
     post: sessionStorage.getItem("post") || "",
     administrativePosts: valueList(sessionStorage.getItem("administrativePosts")),
     category: sessionStorage.getItem("category") || auditCategoryFromRole(role),
@@ -525,7 +548,13 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
     auditorRole: sessionStorage.getItem("auditorRole") || role,
     email: sessionStorage.getItem("email") || sessionStorage.getItem("username") || "",
     role,
-  }), [role, roleConfig.roleTitle]);
+  }), [isAuditor, role, roleConfig.roleTitle]);
+  const profile = useMemo(() => ({
+    ...sessionProfile,
+    ...(auditorProfile || {}),
+    role,
+    auditorRole: auditorProfile?.auditorRole || sessionProfile.auditorRole,
+  }), [auditorProfile, role, sessionProfile]);
 
   const allSubmissions = useMemo(() => [...submissions.academic, ...submissions.administrative], [submissions]);
   const metrics = useMemo(() => buildMetrics(allSubmissions), [allSubmissions]);
@@ -576,6 +605,41 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
     academic: isAuditor ? submissions.academic : submissions.academic.filter((submission) => !isAuditorCompleted(submission)),
     administrative: isAuditor ? submissions.administrative : submissions.administrative.filter((submission) => !isAuditorCompleted(submission)),
   }), [isAuditor, submissions]);
+
+  useEffect(() => {
+    if (!isAuditor) return undefined;
+
+    let isActive = true;
+    const loadAuditorProfile = async () => {
+      try {
+        const { data } = await fetchUsers();
+        const sessionId = String(sessionProfile.id || "");
+        const sessionEmail = normalizeAuditAssignment(sessionProfile.email || "");
+        const matchedUser = userList(data)
+          .map(normalizeAuditor)
+          .find((user) =>
+            (sessionId && String(user.id) === sessionId) ||
+            (sessionEmail && normalizeAuditAssignment(user.email) === sessionEmail)
+          );
+
+        if (isActive && matchedUser) {
+          setAuditorProfile({
+            ...matchedUser,
+            role,
+            auditorRole: matchedUser.role || sessionProfile.auditorRole,
+          });
+        }
+      } catch {
+        if (isActive) setAuditorProfile(null);
+      }
+    };
+
+    loadAuditorProfile();
+
+    return () => {
+      isActive = false;
+    };
+  }, [isAuditor, role, sessionProfile.auditorRole, sessionProfile.email, sessionProfile.id]);
 
   useEffect(() => {
     let isActive = true;
@@ -883,7 +947,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
     }
   };
 
-  const completeAuditorReview = async (submission, values) => {
+  const completeAuditorReview = async (submission, values, auditorAttachments = submission.attachments) => {
     const ok = window.confirm(`Forward completed ${auditLabels[submission.auditType]} remarks to IQAC and VC?`);
     if (!ok) return;
 
@@ -897,7 +961,10 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
           auditType: submission.auditType,
           values: signedValues,
           tables: submission.tables,
-          attachments: submission.attachments,
+          attachments: uniqueAttachments([
+            ...(auditorAttachments || []),
+            ...attachmentsFromValues(signedValues),
+          ]),
         });
       const payload = {
         status: backendStatusFor("auditor-completed"),
@@ -1592,6 +1659,7 @@ function FullFormReview({
 }) {
   const sections = sectionsForAudit(submission.auditType);
   const [draftValues, setDraftValues] = useState(submission.values || {});
+  const [draftAttachments, setDraftAttachments] = useState(submission.attachments || []);
   const submittedForm = {
     values: draftValues,
     tables: submission.tables || {},
@@ -1617,6 +1685,29 @@ function FullFormReview({
   };
   const handleAuditorFieldChange = (fieldId, value) => {
     setDraftValues((current) => ({ ...current, [fieldId]: value }));
+  };
+  const handleAuditorFileUpload = async (fieldId, files) => {
+    const uploaded = await uploadAttachments(files);
+    setDraftValues((current) => ({
+      ...current,
+      [fieldId]: uniqueAttachments([
+        ...valueList(current[fieldId]).filter(isAttachmentValue),
+        ...uploaded,
+      ]),
+    }));
+    setDraftAttachments((current) => uniqueAttachments([...current, ...uploaded]));
+  };
+  const handleAuditorFileDelete = async (fieldId, attachment) => {
+    if (attachment?.url) await deleteAttachment(attachment);
+    setDraftValues((current) => ({
+      ...current,
+      [fieldId]: valueList(current[fieldId])
+        .filter(isAttachmentValue)
+        .filter((file) => attachmentKeyFor(file) !== attachmentKeyFor(attachment)),
+    }));
+    setDraftAttachments((current) =>
+      current.filter((file) => attachmentKeyFor(file) !== attachmentKeyFor(attachment))
+    );
   };
   const previousInternalReport = (submission.versionHistory || [])
     .filter((entry) =>
@@ -1711,6 +1802,8 @@ function FullFormReview({
         activeSectionIndex={activeSectionIndex}
         editableSection={canEditAuditorSection && activeSectionIsAuditorOwned}
         onFieldChange={handleAuditorFieldChange}
+        onFileUpload={handleAuditorFileUpload}
+        onFileDelete={handleAuditorFileDelete}
       />
 
       <div style={styles.fullReviewActions}>
@@ -1729,7 +1822,7 @@ function FullFormReview({
           <div style={styles.finalReviewPanel}>
             <div style={styles.finalActionRow}>
               <span style={styles.reviewHint}>Complete the auditor observations and recommendations, then forward the form to IQAC and VC.</span>
-              <button type="button" className="btn btn-primary" onClick={() => onCompleteAuditorReview(draftValues)} disabled={Boolean(reviewingStatus)} aria-busy={reviewingStatus === "auditor-completed"}>
+              <button type="button" className="btn btn-primary" onClick={() => onCompleteAuditorReview(draftValues, draftAttachments)} disabled={Boolean(reviewingStatus)} aria-busy={reviewingStatus === "auditor-completed"}>
                 {reviewingStatus === "auditor-completed" && <InlineSpinner label="Forwarding review" />}
                 {reviewingStatus === "auditor-completed" ? "Forwarding..." : "Forward to IQAC & VC"}
               </button>
@@ -1827,6 +1920,8 @@ function PreviousAuditorReference({ auditType, history }) {
           activeSectionIndex={auditorSectionIndex}
           editableSection={false}
           onFieldChange={() => {}}
+          onFileUpload={() => {}}
+          onFileDelete={() => {}}
         />
       </div>
     </details>
@@ -1851,7 +1946,7 @@ function SectionReviewNav({ sections, activeIndex, onChange }) {
   );
 }
 
-function SubmittedFormViewer({ sections, formData, auditType, activeSectionIndex, editableSection, onFieldChange }) {
+function SubmittedFormViewer({ sections, formData, auditType, activeSectionIndex, editableSection, onFieldChange, onFileUpload, onFileDelete }) {
   const activeSection = sections[activeSectionIndex] || sections[0];
 
   return (
@@ -1877,6 +1972,8 @@ function SubmittedFormViewer({ sections, formData, auditType, activeSectionIndex
                   fields={block.fields}
                   values={formData.values}
                   onFieldChange={onFieldChange}
+                  onFileUpload={onFileUpload}
+                  onFileDelete={onFileDelete}
                 />
               ) : (
                 <ReadOnlyFieldGrid
@@ -1939,7 +2036,37 @@ function SubmittedFormViewer({ sections, formData, auditType, activeSectionIndex
   );
 }
 
-function EditableFieldGrid({ fields, values, onFieldChange }) {
+function EditableFieldGrid({ fields, values, onFieldChange, onFileUpload, onFileDelete }) {
+  const [uploadingField, setUploadingField] = useState("");
+  const [deletingKey, setDeletingKey] = useState("");
+  const [fileError, setFileError] = useState("");
+
+  const handleFilesSelected = async (fieldId, files) => {
+    if (!files?.length) return;
+    setUploadingField(fieldId);
+    setFileError("");
+    try {
+      await onFileUpload(fieldId, files);
+    } catch (error) {
+      setFileError(error?.response?.data?.message || error?.message || "Could not upload documentation.");
+    } finally {
+      setUploadingField("");
+    }
+  };
+
+  const handleFileDelete = async (fieldId, attachment) => {
+    const key = `${fieldId}-${attachmentKeyFor(attachment)}`;
+    setDeletingKey(key);
+    setFileError("");
+    try {
+      await onFileDelete(fieldId, attachment);
+    } catch (error) {
+      setFileError(error?.response?.data?.message || error?.message || "Could not remove documentation.");
+    } finally {
+      setDeletingKey("");
+    }
+  };
+
   return (
     <div style={styles.readOnlyFieldGrid}>
       {fields.map((field) => {
@@ -1948,6 +2075,55 @@ function EditableFieldGrid({ fields, values, onFieldChange }) {
             <h4 key={field.id} style={styles.reviewSubheading}>
               {field.label}
             </h4>
+          );
+        }
+
+        if (field.type === "file") {
+          const attachments = valueList(values[field.id]).filter(isAttachmentValue);
+          const isUploading = uploadingField === field.id;
+
+          return (
+            <div key={field.id} style={styles.readOnlyWideField}>
+              <span style={styles.readOnlyLabel}>{field.label}</span>
+              <div style={styles.documentationUploader}>
+                <label style={styles.documentationUploadButton}>
+                  <input
+                    type="file"
+                    multiple
+                    onChange={(event) => {
+                      handleFilesSelected(field.id, event.target.files);
+                      event.target.value = "";
+                    }}
+                    style={styles.hiddenFileInput}
+                    disabled={isUploading}
+                  />
+                  {isUploading ? "Uploading..." : "Upload Documentation"}
+                </label>
+                <span style={styles.documentationHint}>PDF, Excel, Word, images, ZIP, or any supporting file.</span>
+              </div>
+              {!!attachments.length && (
+                <div style={styles.documentationList}>
+                  {attachments.map((attachment, index) => {
+                    const key = `${field.id}-${attachmentKeyFor(attachment)}-${index}`;
+                    const isDeleting = deletingKey === `${field.id}-${attachmentKeyFor(attachment)}`;
+                    return (
+                      <div key={key} style={styles.documentationItem}>
+                        <div style={styles.documentationItemBody}>{renderValue(attachment)}</div>
+                        <button
+                          type="button"
+                          style={styles.documentationDeleteButton}
+                          onClick={() => handleFileDelete(field.id, attachment)}
+                          disabled={isDeleting}
+                        >
+                          {isDeleting ? "Removing..." : "Remove"}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {fileError && <span style={styles.errorText}>{fileError}</span>}
+            </div>
           );
         }
 
@@ -2002,7 +2178,7 @@ function ReadOnlyFieldGrid({ fields, values }) {
         }
 
         return (
-          <div key={field.id} style={field.type === "textarea" ? styles.readOnlyWideField : styles.readOnlyField}>
+          <div key={field.id} style={["textarea", "file"].includes(field.type) ? styles.readOnlyWideField : styles.readOnlyField}>
             <div style={styles.readOnlyLabel}>{field.label}</div>
             <div style={styles.readOnlyValue}>{renderValue(values[field.id])}</div>
           </div>
@@ -2091,7 +2267,7 @@ function renderValue(value) {
         </span>
         <span style={styles.attachmentDocumentDetails}>
           <strong style={styles.attachmentDocumentName} title={name}>{name}</strong>
-          <small style={styles.mutedText}>PDF document</small>
+          <small style={styles.mutedText}>Document</small>
         </span>
         {url ? (
           <a href={getAttachmentUrl(url)} target="_blank" rel="noreferrer" style={styles.attachmentLink} title="Open document">
@@ -3652,6 +3828,71 @@ const styles = {
     resize: "vertical",
     fontSize: 12.5,
     lineHeight: 1.45,
+  },
+  documentationUploader: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    flexWrap: "wrap",
+    padding: 12,
+    border: "1px dashed #bfdbfe",
+    borderRadius: 10,
+    background: "#eff6ff",
+  },
+  documentationUploadButton: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 38,
+    border: "1px solid #2563eb",
+    borderRadius: 9,
+    padding: "9px 13px",
+    color: "#fff",
+    background: "#2563eb",
+    cursor: "pointer",
+    fontSize: 12,
+    fontWeight: 800,
+  },
+  hiddenFileInput: {
+    display: "none",
+  },
+  documentationHint: {
+    color: "#475569",
+    fontSize: 12,
+    lineHeight: 1.45,
+  },
+  documentationList: {
+    display: "grid",
+    gap: 8,
+  },
+  documentationItem: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) auto",
+    alignItems: "center",
+    gap: 10,
+    padding: 8,
+    border: "1px solid #e2e8f0",
+    borderRadius: 10,
+    background: "#fff",
+  },
+  documentationItemBody: {
+    minWidth: 0,
+  },
+  documentationDeleteButton: {
+    border: "1px solid #fecaca",
+    borderRadius: 8,
+    padding: "8px 10px",
+    color: "#b91c1c",
+    background: "#fef2f2",
+    cursor: "pointer",
+    fontFamily: "inherit",
+    fontSize: 12,
+    fontWeight: 800,
+  },
+  errorText: {
+    color: "#b91c1c",
+    fontSize: 11,
+    fontWeight: 700,
   },
   readOnlyTableBlock: {
     marginTop: 8,
