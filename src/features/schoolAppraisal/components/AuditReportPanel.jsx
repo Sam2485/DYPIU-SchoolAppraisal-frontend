@@ -12,6 +12,21 @@ const blocksFor = (section) =>
 
 const isOmittedReportText = (value) =>
   String(value || "").trim().toLowerCase() === "reviewers (vc & iqac) cannot create or submit audits";
+const ACADEMIC_PART_E_SECTION_ID = "part-e-observations";
+const ACADEMIC_PART_E_FIELD_IDS = ["auditObservations", "auditRecommendations", "auditDocumentation"];
+const isAttachmentValue = (value) =>
+  value &&
+  typeof value === "object" &&
+  !Array.isArray(value) &&
+  (value.url || value.publicUrl || value.downloadUrl || value.name || value.fileName);
+const hasAcademicPartEValues = (values = {}) =>
+  ACADEMIC_PART_E_FIELD_IDS.some((fieldId) => {
+    const value = values[fieldId];
+    if (Array.isArray(value)) return value.length > 0;
+    if (isAttachmentValue(value)) return true;
+    if (value && typeof value === "object") return Object.keys(value).length > 0;
+    return String(value || "").trim().length > 0;
+  });
 
 export default function AuditReportPanel({
   schema,
@@ -21,7 +36,11 @@ export default function AuditReportPanel({
   reportCategory = "",
   currentAuditor = {},
   previousInternalAuditor = {},
+  previousInternalValues = {},
+  previousInternalMeta = "",
 }) {
+  const isExternalReport = String(reportCategory).toLowerCase() === "external";
+
   return (
     <div className="generated-report" style={styles.panel}>
       <header className="generated-report__cover" style={styles.header}>
@@ -47,9 +66,36 @@ export default function AuditReportPanel({
           </div>
           {blocksFor(section).map((block, blockIndex) => {
             if (block.type === "fields") {
+              const showPreviousInternalPartE =
+                isExternalReport &&
+                section.id === ACADEMIC_PART_E_SECTION_ID &&
+                hasAcademicPartEValues(previousInternalValues);
+
+              if (showPreviousInternalPartE) {
+                return (
+                  <div key={`part-e-comparison-${blockIndex}`} style={styles.partEReportComparison}>
+                    <div style={styles.partEReportBlock}>
+                      <div style={styles.partEReportHeader}>
+                        <h3 style={styles.partEReportTitle}>Internal Auditor Part E - V1</h3>
+                        {previousInternalMeta && <span style={styles.partEReportMeta}>{previousInternalMeta}</span>}
+                      </div>
+                      <ReportFieldsTable fields={block.fields} values={previousInternalValues} />
+                    </div>
+                    <div style={styles.partEReportBlock}>
+                      <h3 style={styles.partEReportTitle}>External Auditor Part E - Current External Audit</h3>
+                      <ReportFieldsTable fields={block.fields} values={values} />
+                    </div>
+                  </div>
+                );
+              }
+
               return (
                 <ReportFieldsTable key={`fields-${blockIndex}`} fields={block.fields} values={values} />
               );
+            }
+
+            if (!Array.isArray(block.tables)) {
+              return null;
             }
 
             return block.tables.map((table) => {
@@ -176,7 +222,7 @@ function ReportFieldsTable({ fields, values }) {
         ) : (
           <tr key={field.id}>
             <th scope="row" style={styles.detailLabel}>{field.label}</th>
-            <td style={styles.detailValue}>{values[field.id] || "-"}</td>
+            <td style={styles.detailValue}><ReportCellValue value={values[field.id]} /></td>
           </tr>
         ))}
       </tbody>
@@ -264,6 +310,37 @@ const styles = {
   detailHeading: { padding: "9px 12px", border: "1px solid #cbd5e1", color: "#1e3a8a", background: "#eff6ff", fontSize: 12, textAlign: "left" },
   detailLabel: { width: "36%", padding: "9px 12px", border: "1px solid #dbe3ef", color: "#475569", background: "#f8fafc", fontSize: 11, fontWeight: 700, textAlign: "left", verticalAlign: "top" },
   detailValue: { padding: "9px 12px", border: "1px solid #dbe3ef", color: "#0f172a", background: "#fff", fontSize: 11.5, whiteSpace: "pre-wrap", verticalAlign: "top" },
+  partEReportComparison: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 16,
+  },
+  partEReportBlock: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+  },
+  partEReportHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    flexWrap: "wrap",
+  },
+  partEReportTitle: {
+    margin: "0 0 8px",
+    padding: "9px 12px",
+    borderLeft: "4px solid #2563eb",
+    borderRadius: 6,
+    background: "#eff6ff",
+    color: "#0f172a",
+    fontSize: 14,
+  },
+  partEReportMeta: {
+    color: "#2563eb",
+    fontSize: 11,
+    fontWeight: 800,
+  },
   subheading: {
     gridColumn: "1 / -1",
     margin: "6px 0 0",

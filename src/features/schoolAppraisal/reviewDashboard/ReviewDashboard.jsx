@@ -208,10 +208,46 @@ const normalizeAuditType = (value = "") => String(value).toLowerCase().includes(
 const normalizeStatus = (value = "submitted") => String(value).toLowerCase().replaceAll("_", "-");
 const backendStatusFor = (status) => status.toUpperCase().replaceAll("-", "_");
 const isAuditorRole = (role = "") => String(role).includes("auditor");
+const ACADEMIC_PART_E_SECTION_ID = "part-e-observations";
+const ACADEMIC_PART_E_FIELD_IDS = ["auditObservations", "auditRecommendations", "auditDocumentation"];
 const auditorSectionNumberFor = (auditType) => auditType === "academic" ? "E" : "F";
 const isAuditorSection = (section, auditType) =>
   section.number === auditorSectionNumberFor(auditType) ||
   new RegExp(`^Part\\s+${auditorSectionNumberFor(auditType)}\\b`, "i").test(section.title || "");
+const hasAcademicPartEValues = (values = {}) =>
+  ACADEMIC_PART_E_FIELD_IDS.some((fieldId) => {
+    const value = values[fieldId];
+    if (Array.isArray(value)) return value.length > 0;
+    if (isAttachmentValue(value)) return true;
+    if (value && typeof value === "object") return Object.keys(value).length > 0;
+    return String(value || "").trim().length > 0;
+  });
+const comparablePartEValue = (value) => {
+  if (Array.isArray(value)) return JSON.stringify(value.map(comparablePartEValue));
+  if (isAttachmentValue(value)) return attachmentKeyFor(value);
+  if (value && typeof value === "object") return JSON.stringify(value);
+  return String(value || "").trim();
+};
+const academicPartEValuesMatch = (firstValues = {}, secondValues = {}) =>
+  ACADEMIC_PART_E_FIELD_IDS.every((fieldId) =>
+    comparablePartEValue(firstValues[fieldId]) === comparablePartEValue(secondValues[fieldId])
+  );
+const clearAcademicPartEValues = (values = {}) => ({
+  ...values,
+  auditObservations: "",
+  auditRecommendations: "",
+  auditDocumentation: [],
+});
+const removeMatchingPartEAttachments = (attachments = [], previousValues = {}) => {
+  const previousAttachmentKeys = new Set(
+    valueList(previousValues.auditDocumentation)
+      .filter(isAttachmentValue)
+      .map(attachmentKeyFor)
+      .filter(Boolean)
+  );
+  if (!previousAttachmentKeys.size) return attachments;
+  return attachments.filter((attachment) => !previousAttachmentKeys.has(attachmentKeyFor(attachment)));
+};
 const withAuditorSignOff = (values = {}, profile = {}, auditedAt = new Date().toISOString()) => ({
   ...values,
   [SIGN_OFF_FIELD]: {
@@ -1658,8 +1694,37 @@ function FullFormReview({
   showPreviousAuditorReference,
 }) {
   const sections = sectionsForAudit(submission.auditType);
-  const [draftValues, setDraftValues] = useState(submission.values || {});
-  const [draftAttachments, setDraftAttachments] = useState(submission.attachments || []);
+  const previousInternalReport = (submission.versionHistory || [])
+    .filter((entry) =>
+      (
+        String(entry.reportCategory || "").toLowerCase() === "internal" ||
+        (
+          String(submission.reportCategory || "").toLowerCase() === "external" &&
+          Number(entry.version || 0) < Number(submission.version || 0)
+        )
+      ) &&
+      (getSubmissionAuditorSignOff(entry).name || hasAcademicPartEValues(entry.values))
+    )
+    .sort((first, second) => Number(second.version || 0) - Number(first.version || 0))[0];
+  const previousInternalAuditor = getSubmissionAuditorSignOff(previousInternalReport);
+  const currentAuditor = getSubmissionAuditorSignOff(submission);
+  const isExternalAcademicReport =
+    submission.auditType === "academic" &&
+    String(submission.reportCategory || "").toLowerCase() === "external";
+  const shouldClearCopiedExternalPartE =
+    isExternalAcademicReport &&
+    canEditAuditorSection &&
+    !auditorReviewReadOnly &&
+    hasAcademicPartEValues(previousInternalReport?.values) &&
+    academicPartEValuesMatch(submission.values, previousInternalReport.values);
+  const [draftValues, setDraftValues] = useState(
+    shouldClearCopiedExternalPartE ? clearAcademicPartEValues(submission.values) : submission.values || {}
+  );
+  const [draftAttachments, setDraftAttachments] = useState(
+    shouldClearCopiedExternalPartE
+      ? removeMatchingPartEAttachments(submission.attachments || [], previousInternalReport.values)
+      : submission.attachments || []
+  );
   const submittedForm = {
     values: draftValues,
     tables: submission.tables || {},
@@ -1709,20 +1774,12 @@ function FullFormReview({
       current.filter((file) => attachmentKeyFor(file) !== attachmentKeyFor(attachment))
     );
   };
-  const previousInternalReport = (submission.versionHistory || [])
-    .filter((entry) =>
-      (
-        String(entry.reportCategory || "").toLowerCase() === "internal" ||
-        (
-          String(submission.reportCategory || "").toLowerCase() === "external" &&
-          Number(entry.version || 0) < Number(submission.version || 0)
-        )
-      ) &&
-      getSubmissionAuditorSignOff(entry).name
-    )
-    .sort((first, second) => Number(second.version || 0) - Number(first.version || 0))[0];
-  const previousInternalAuditor = getSubmissionAuditorSignOff(previousInternalReport);
-  const currentAuditor = getSubmissionAuditorSignOff(submission);
+  const previousInternalPartE =
+    isExternalAcademicReport &&
+    !showPreviousAuditorReference &&
+    hasAcademicPartEValues(previousInternalReport?.values)
+      ? previousInternalReport
+      : null;
 
   if (reportMode) {
     return (
@@ -1741,6 +1798,12 @@ function FullFormReview({
               reportCategory={submission.reportCategory}
               currentAuditor={currentAuditor}
               previousInternalAuditor={previousInternalAuditor}
+              previousInternalValues={previousInternalReport?.values}
+              previousInternalMeta={
+                previousInternalReport
+                  ? `${titleCase(previousInternalReport.reportCategory || "internal")} Audit - ${previousInternalReport.auditCycle} - V${previousInternalReport.version}`
+                  : ""
+              }
             />
           </>
         ) : (
@@ -1804,6 +1867,12 @@ function FullFormReview({
         onFieldChange={handleAuditorFieldChange}
         onFileUpload={handleAuditorFileUpload}
         onFileDelete={handleAuditorFileDelete}
+        previousInternalPartEValues={previousInternalPartE?.values}
+        previousInternalPartEMeta={
+          previousInternalPartE
+            ? `${titleCase(previousInternalPartE.reportCategory || "internal")} Audit - ${previousInternalPartE.auditCycle} - V${previousInternalPartE.version}`
+            : ""
+        }
       />
 
       <div style={styles.fullReviewActions}>
@@ -1946,8 +2015,23 @@ function SectionReviewNav({ sections, activeIndex, onChange }) {
   );
 }
 
-function SubmittedFormViewer({ sections, formData, auditType, activeSectionIndex, editableSection, onFieldChange, onFileUpload, onFileDelete }) {
+function SubmittedFormViewer({
+  sections,
+  formData,
+  auditType,
+  activeSectionIndex,
+  editableSection,
+  onFieldChange,
+  onFileUpload,
+  onFileDelete,
+  previousInternalPartEValues,
+  previousInternalPartEMeta = "",
+}) {
   const activeSection = sections[activeSectionIndex] || sections[0];
+  const showPreviousInternalPartE =
+    auditType === "academic" &&
+    activeSection?.id === ACADEMIC_PART_E_SECTION_ID &&
+    hasAcademicPartEValues(previousInternalPartEValues);
 
   return (
     <div style={styles.formViewer}>
@@ -1966,7 +2050,7 @@ function SubmittedFormViewer({ sections, formData, auditType, activeSectionIndex
 
           {blocksFor(activeSection).map((block, blockIndex) => {
             if (block.type === "fields") {
-              return editableSection ? (
+              const currentFields = editableSection ? (
                 <EditableFieldGrid
                   key={`${activeSection.id}-fields-${blockIndex}`}
                   fields={block.fields}
@@ -1982,6 +2066,26 @@ function SubmittedFormViewer({ sections, formData, auditType, activeSectionIndex
                   values={formData.values}
                 />
               );
+
+              if (showPreviousInternalPartE) {
+                return (
+                  <div key={`${activeSection.id}-part-e-comparison-${blockIndex}`} style={styles.partEComparison}>
+                    <div style={styles.partEReferenceBlock}>
+                      <div style={styles.partEReferenceHeader}>
+                        <h4 style={styles.partEReferenceTitle}>Internal Auditor Part E - V1</h4>
+                        {previousInternalPartEMeta && <span style={styles.partEReferenceMeta}>{previousInternalPartEMeta}</span>}
+                      </div>
+                      <ReadOnlyFieldGrid fields={block.fields} values={previousInternalPartEValues} />
+                    </div>
+                    <div style={styles.partECurrentBlock}>
+                      <h4 style={styles.partEReferenceTitle}>External Auditor Part E - Current External Audit</h4>
+                      {currentFields}
+                    </div>
+                  </div>
+                );
+              }
+
+              return currentFields;
             }
 
             if (block.type === "text") {
@@ -3751,6 +3855,45 @@ const styles = {
     color: "#0f172a",
     fontSize: 12,
     fontWeight: 650,
+  },
+  partEComparison: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 14,
+  },
+  partEReferenceBlock: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 12,
+    padding: 14,
+    border: "1px solid #bfdbfe",
+    borderRadius: 10,
+    background: "#f8fbff",
+  },
+  partECurrentBlock: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 12,
+    paddingTop: 2,
+  },
+  partEReferenceHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    flexWrap: "wrap",
+  },
+  partEReferenceTitle: {
+    margin: 0,
+    color: "#0f172a",
+    fontSize: 14,
+    fontWeight: 800,
+    lineHeight: 1.35,
+  },
+  partEReferenceMeta: {
+    color: "#2563eb",
+    fontSize: 11,
+    fontWeight: 800,
   },
   reviewTables: {
     display: "flex",
