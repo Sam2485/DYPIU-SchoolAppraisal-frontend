@@ -57,6 +57,7 @@ const PREVIOUS_REPORTS_NAV_ITEM = {
 };
 const USER_MANAGEMENT_NAV_ITEM = { id: "user-management", title: "User Management" };
 const REPORT_ARCHIVE_FIELD = "__reportArchive";
+const ADMIN_SUBMISSION_STATUS_FIELD = "__administrativeSubmissionStatus";
 const START_NEXT_YEAR_NAV_ITEM = {
   id: "start-next-academic-year",
   title: "Start Next Academic Year",
@@ -306,6 +307,19 @@ const valueList = (value) => {
   }
   return [value].filter(Boolean);
 };
+const safeObjectValue = (value) => {
+  if (!value) return {};
+  if (typeof value === "object" && !Array.isArray(value)) return value;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
+};
 const normalizeUserRole = (value = "") => String(value).trim().toLowerCase().replaceAll("_", "-");
 const normalizeSchoolGroup = (value = "", school = "", auditType = "academic") => {
   if (auditType !== "academic") return "all";
@@ -341,6 +355,14 @@ const postAliasesFor = (value = "") => {
     option ? normalizeAuditAssignment(option.label) : "",
   ]);
 };
+const administrativeStatusKeyForPost = (post = "") => {
+  const normalized = normalizeAuditAssignment(post);
+  if (normalized === "hr" || normalized.includes("human resource")) return "hr";
+  if (normalized.includes("student welfare") || normalized === "dsw" || normalized === "dean student welfare") return "deanStudentWelfare";
+  if (normalized.includes("placement") || normalized === "dean placement") return "deanPlacement";
+  if (normalized.includes("registrar")) return "registrar";
+  return "";
+};
 const administrativePostsFor = (user = {}) => {
   const rawPosts = [
     user.administrativePosts,
@@ -363,6 +385,50 @@ const assignmentMatches = (left, right, aliasesFor = (value) => uniqueValues([no
   return leftAliases.some((leftAlias) =>
     rightAliases.some((rightAlias) => leftAlias === rightAlias || leftAlias.includes(rightAlias) || rightAlias.includes(leftAlias))
   );
+};
+const administrativeSubmittedPostsFor = (submission = {}) => {
+  const progress = safeObjectValue(submission.administrativeProgress || submission.sectionProgress || submission.contributionProgress);
+  const status = safeObjectValue(submission.values?.[ADMIN_SUBMISSION_STATUS_FIELD]);
+  const submittedKeys = new Set();
+  const sectionPostMap = {
+    A: "registrar",
+    B: "hr",
+    C: "registrar",
+    D: "dean-student-welfare",
+    E: "dean-placement",
+  };
+
+  [
+    submission.contributorPost,
+    submission.contributorPosts,
+    submission.administrativePosts,
+    submission.assignedPosts,
+    submission.posts,
+  ].flatMap(valueList).forEach((post) => {
+    if (post) submittedKeys.add(post);
+  });
+
+  valueList(submission.contributorSections || submission.submittedSections || submission.sectionNumbers).forEach((section) => {
+    const post = sectionPostMap[String(section).trim().toUpperCase()];
+    if (post) submittedKeys.add(post);
+  });
+
+  Object.entries(progress).forEach(([post, state]) => {
+    if (["submitted", "approved", "under-review", "auditor-completed"].includes(String(state).toLowerCase())) {
+      submittedKeys.add(administrativeStatusKeyForPost(post) || post);
+    }
+  });
+
+  Object.entries(status).forEach(([key, info]) => {
+    const details = safeObjectValue(info);
+    if (details.submitted || details.submittedAt) submittedKeys.add(key);
+  });
+
+  return uniqueValues([...submittedKeys].map((key) => {
+    if (key === "deanStudentWelfare") return "dean-student-welfare";
+    if (key === "deanPlacement") return "dean-placement";
+    return key;
+  }));
 };
 const auditCategoryFromRole = (role = "") => role.includes("administrative") ? "administrative" : role.includes("academic") ? "academic" : "";
 const auditorTypeFromRole = (role = "") => role.includes("external") ? "external" : role.includes("internal") ? "internal" : "";
@@ -402,8 +468,15 @@ const matchesSubmissionAssignment = (auditor, submission) => {
     return assignmentMatches(auditor.school || auditor.assignment, submission.school, schoolAliasesFor);
   }
 
-  const submissionPost = normalizeAuditAssignment(submission.submittedByDesignation || submission.post || submission.department || submission.school);
   const auditorPosts = administrativePostsFor(auditor);
+  const submittedPosts = administrativeSubmittedPostsFor(submission);
+  if (submittedPosts.length) {
+    return auditorPosts.some((auditorPost) =>
+      submittedPosts.some((submittedPost) => assignmentMatches(auditorPost, submittedPost, postAliasesFor))
+    );
+  }
+
+  const submissionPost = normalizeAuditAssignment(submission.submittedByDesignation || submission.post || submission.department || submission.school);
   return Boolean(
     submissionPost &&
     auditorPosts.some((post) => assignmentMatches(post, submissionPost, postAliasesFor))
@@ -425,6 +498,13 @@ const matchesAuditorResponsibility = (submission, profile) => {
   }
 
   const auditorPosts = administrativePostsFor(profile);
+  const submittedPosts = administrativeSubmittedPostsFor(submission);
+  if (submittedPosts.length) {
+    return auditorPosts.some((auditorPost) =>
+      submittedPosts.some((submittedPost) => assignmentMatches(auditorPost, submittedPost, postAliasesFor))
+    );
+  }
+
   const submissionPost = submission.submittedByDesignation || submission.post || submission.department || submission.school;
   return auditorPosts.some((post) => assignmentMatches(post, submissionPost, postAliasesFor));
 };
@@ -475,6 +555,9 @@ const normalizeSubmission = (submission = {}) => {
   const auditorSignOff = getAuditorSignOff(values);
   const archiveMetadata = values[REPORT_ARCHIVE_FIELD] || {};
   const school = submission.school || submission.schoolName || submission.department || "School";
+  const administrativeProgress = safeObjectValue(
+    submission.administrativeProgress || submission.sectionProgress || submission.contributionProgress,
+  );
 
   return {
     ...submission,
@@ -484,6 +567,7 @@ const normalizeSubmission = (submission = {}) => {
     auditType,
     group: normalizeSchoolGroup(submission.group || submission.schoolGroup, school, auditType),
     school,
+    administrativeProgress,
     submittedBy: signOff.submittedBy.name || submission.userName || "-",
     submittedByDesignation: signOff.submittedBy.designation || (auditType === "academic" ? "Director" : ""),
     submittedOn: signOff.submittedBy.date || new Date().toISOString(),
@@ -951,6 +1035,12 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
     }
     const auditorNames = matchingAuditors.map((auditor) => auditor.name).filter(Boolean);
     const auditorEmails = matchingAuditors.map((auditor) => auditor.email).filter(Boolean);
+    const submittedAdministrativePosts = forwardTarget.auditType === "administrative"
+      ? administrativeSubmittedPostsFor(forwardTarget)
+      : [];
+    const auditorAdministrativePosts = forwardTarget.auditType === "administrative"
+      ? uniqueValues(matchingAuditors.flatMap(administrativePostsFor))
+      : [];
     const groupLabel = `${auditorNames.length} ${auditorType} ${forwardTarget.auditType} auditor${auditorNames.length === 1 ? "" : "s"}`;
 
     const payload = {
@@ -959,6 +1049,11 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
       forwardedToAuditorNames: auditorNames,
       forwardedToAuditorEmails: auditorEmails,
       forwardedAuditorType: auditorType,
+      forwardedAuditCategory: forwardTarget.auditType,
+      ...(forwardTarget.auditType === "administrative" ? {
+        forwardedAdministrativePosts: submittedAdministrativePosts,
+        forwardedToAuditorPosts: auditorAdministrativePosts,
+      } : {}),
     };
 
     try {
@@ -2546,9 +2641,12 @@ function ForwardAuditorModal({ submission, auditors, loading, selectedType, onTy
     : [];
   const selectedAuditors = matchingAuditors.filter((auditor) => selectedAuditorIds.includes(String(auditor.id)));
   const allSelected = matchingAuditors.length > 0 && selectedAuditors.length === matchingAuditors.length;
+  const administrativeAssignment = administrativeSubmittedPostsFor(submission)
+    .map((post) => ADMINISTRATIVE_POSTS.find((option) => option.value === post)?.label || post)
+    .join(", ");
   const assignmentLabel = submission.auditType === "academic"
     ? submission.school
-    : (submission.submittedByDesignation || submission.school || "Administrative submission");
+    : (administrativeAssignment || submission.submittedByDesignation || submission.school || "Administrative submission");
 
   const toggleAuditor = (auditorId) => {
     const normalizedId = String(auditorId);
