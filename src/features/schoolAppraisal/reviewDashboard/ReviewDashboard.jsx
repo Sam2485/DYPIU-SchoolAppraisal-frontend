@@ -320,7 +320,22 @@ const safeObjectValue = (value) => {
   }
   return {};
 };
+const booleanOrNull = (value) => {
+  if (value === true || value === false) return value;
+  if (value == null || value === "") return null;
+  const normalized = String(value).trim().toLowerCase();
+  if (["true", "1", "yes", "y"].includes(normalized)) return true;
+  if (["false", "0", "no", "n"].includes(normalized)) return false;
+  return null;
+};
 const normalizeUserRole = (value = "") => String(value).trim().toLowerCase().replaceAll("_", "-");
+const contributorStageStatuses = new Set([
+  "pending-contributor-submission",
+  "external-contributor-pending",
+  "contributor-pending",
+  "pending-contribution",
+  "external-draft",
+]);
 const normalizeSchoolGroup = (value = "", school = "", auditType = "academic") => {
   if (auditType !== "academic") return "all";
 
@@ -331,6 +346,23 @@ const normalizeSchoolGroup = (value = "", school = "", auditType = "academic") =
 };
 const normalizeAuditAssignment = (value = "") => String(value).trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
 const uniqueValues = (values) => [...new Set(values.filter(Boolean))];
+const isAdministrativeContributorStage = (submission = {}) =>
+  submission.auditType === "administrative" &&
+  contributorStageStatuses.has(normalizeStatus(submission.overallStatus || submission.status));
+const canForwardSubmissionToAuditor = (submission = {}) => {
+  if (submission.canForwardToAuditor !== null && submission.canForwardToAuditor !== undefined) {
+    return submission.canForwardToAuditor;
+  }
+  if (isAdministrativeContributorStage(submission)) return false;
+  if (
+    submission.auditType === "administrative" &&
+    String(submission.reportCategory || "").toLowerCase() === "external" &&
+    submission.allContributorsSubmitted === false
+  ) {
+    return false;
+  }
+  return true;
+};
 const schoolAliasesFor = (value = "") => {
   const normalized = normalizeAuditAssignment(value);
   const option = SCHOOL_OPTIONS.find((school) =>
@@ -558,6 +590,9 @@ const normalizeSubmission = (submission = {}) => {
   const administrativeProgress = safeObjectValue(
     submission.administrativeProgress || submission.sectionProgress || submission.contributionProgress,
   );
+  const permissions = safeObjectValue(submission.permissions);
+  const status = normalizeStatus(submission.status);
+  const overallStatus = normalizeStatus(submission.overallStatus || submission.workflowStatus || status);
 
   return {
     ...submission,
@@ -584,6 +619,14 @@ const normalizeSubmission = (submission = {}) => {
     forwardedAuditorType: normalizeUserRole(submission.forwardedAuditorType || submission.auditorType || ""),
     forwardedAuditCategory: normalizeUserRole(submission.forwardedAuditCategory || submission.auditCategory || ""),
     forwardedAt: submission.forwardedAt || "",
+    overallStatus,
+    contributionStatus: normalizeStatus(submission.contributionStatus || submission.myContributionStatus || submission.userContributionStatus || ""),
+    canForwardToAuditor: booleanOrNull(submission.canForwardToAuditor ?? permissions.canForwardToAuditor),
+    allContributorsSubmitted: booleanOrNull(
+      submission.allContributorsSubmitted ??
+      submission.allAdministrativeContributorsSubmitted ??
+      permissions.allContributorsSubmitted
+    ),
     auditorReviewedBy: auditorSignOff.name || submission.auditorReviewedBy || submission.auditedBy || "",
     auditorReviewedByDesignation: auditorSignOff.designation || submission.auditorReviewedByDesignation || submission.auditorDesignation || "",
     auditorReviewedByRole: auditorSignOff.role || submission.auditorReviewedByRole || submission.auditorRole || "",
@@ -606,7 +649,7 @@ const normalizeSubmission = (submission = {}) => {
     hasNextCycle: Boolean(submission.hasNextCycle || submission.nextCycleStarted || submission.nextVersionId),
     sections: (Array.isArray(submission.sections) && submission.sections.length && typeof submission.sections[0] === "object") ? submission.sections : sectionsForAudit(auditType),
     attachments: formData.attachments.length ? formData.attachments : submission.attachments || [],
-    status: normalizeStatus(submission.status),
+    status,
     remarks: submission.remarks || "",
   };
 };
@@ -997,6 +1040,11 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
   };
 
   const openForwardModal = async (submission) => {
+    if (!canForwardSubmissionToAuditor(submission)) {
+      setError("Administrative contributors must submit the current cycle before forwarding to auditors.");
+      return;
+    }
+
     setForwardTarget(submission);
     setForwardAuditorType(submission.forwardedAuditorType || "");
     setError("");
@@ -1747,7 +1795,7 @@ function SubmissionCard({
       )}
 
       <div style={styles.cardActions}>
-        {onForward && !isAuditorCompleted(submission) && !hasAuditorAssignment(submission) && (
+        {onForward && canForwardSubmissionToAuditor(submission) && !isAuditorCompleted(submission) && !hasAuditorAssignment(submission) && (
           <button type="button" className="btn btn-secondary" onClick={onForward}>
             Forward to Auditor
           </button>
@@ -1755,7 +1803,11 @@ function SubmissionCard({
         {onStartNextCycle && (
           <button type="button" className="btn btn-primary" onClick={onStartNextCycle} disabled={startingNextCycle} aria-busy={startingNextCycle}>
             {startingNextCycle && <InlineSpinner label="Starting next audit cycle" />}
-            {startingNextCycle ? "Creating next cycle..." : "Forward to External auditor"}
+            {startingNextCycle
+              ? "Creating next cycle..."
+              : submission.auditType === "administrative"
+                ? "Start External cycle"
+                : "Forward to External auditor"}
           </button>
         )}
         {onDownload && (

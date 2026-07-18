@@ -45,6 +45,36 @@ const ADMIN_STATUS_ROLES = [
 ];
 
 const statusRoleForPost = (post) => ADMIN_STATUS_ROLES.find((role) => role.post === post);
+const titleCase = (value = "") => String(value).replaceAll("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+const isLockedContributionStatus = (status = "") => ["approved", "submitted", "auditor-completed"].includes(String(status).toLowerCase().replaceAll("_", "-"));
+const editableContributionStatuses = new Set([
+  "pending",
+  "draft",
+  "external-draft",
+  "pending-contributor-submission",
+  "external-contributor-pending",
+  "contributor-pending",
+  "pending-contribution",
+]);
+const isEditableContributionStatus = (status = "") => editableContributionStatuses.has(String(status).toLowerCase().replaceAll("_", "-"));
+
+const workflowFromDraft = (draft = {}) => ({
+  cycleId: draft.cycleId || null,
+  cycleType: draft.cycleType || "",
+  reportCategory: draft.reportCategory || "",
+  version: draft.version || 1,
+  overallStatus: draft.overallStatus || "",
+  contributionStatus: draft.contributionStatus || "",
+  canEditContribution: draft.canEditContribution,
+  canForwardToAuditor: draft.canForwardToAuditor,
+  allContributorsSubmitted: draft.allContributorsSubmitted,
+});
+
+const cycleLabelFor = (workflow = {}) => {
+  const category = workflow.reportCategory || workflow.cycleType;
+  const categoryText = category ? `${titleCase(category)} Audit` : "Administrative Audit";
+  return `${categoryText} - Version ${workflow.version || 1}`;
+};
 
 const emptyRowFor = (columns, index) => {
   const row = columnsWithSerial(columns).reduce((value, column) => {
@@ -198,6 +228,7 @@ export default function AdministrativeAuditDashboard() {
   const [hasExistingSubmission, setHasExistingSubmission] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [contributionApproved, setContributionApproved] = useState(false);
+  const [workflow, setWorkflow] = useState(workflowFromDraft());
   const [data, setData] = useState(buildInitialData);
 
   const activeModule = useMemo(
@@ -212,8 +243,16 @@ export default function AdministrativeAuditDashboard() {
   const isLastModule = activeModuleIndex === administrativeUserModules.length - 1;
   const finalOwnedModule = ownedModules[ownedModules.length - 1];
   const canEditActiveModule = moduleOwnerPost(activeModule) === userPost;
-  const readOnly = isSubmitted || contributionApproved || !canEditActiveModule;
+  const backendAllowsContributionEdit =
+    workflow.canEditContribution === true ||
+    isEditableContributionStatus(workflow.contributionStatus || workflow.overallStatus);
+  const backendBlocksContributionEdit =
+    workflow.canEditContribution === false ||
+    isLockedContributionStatus(workflow.contributionStatus);
+  const contributionLocked = !backendAllowsContributionEdit && (isSubmitted || contributionApproved);
+  const readOnly = !canEditActiveModule || backendBlocksContributionEdit || contributionLocked;
   const isFinalOwnedModule = canEditActiveModule && activeModule.id === finalOwnedModule?.id;
+  const canWorkOnOwnedModule = canEditActiveModule && !backendBlocksContributionEdit && !contributionLocked;
   const canSubmitPart = isSubmissionConfirmed(submissionConfirmation);
   const currentStatusRole = statusRoleForPost(userPost);
 
@@ -249,7 +288,12 @@ export default function AdministrativeAuditDashboard() {
         });
         setHasExistingSubmission(draft.exists);
         setIsSubmitted(draft.isSubmitted);
-        const contributionStatus = String(draft.administrativeProgress?.[userPost] || "").toLowerCase();
+        setWorkflow(workflowFromDraft(draft));
+        const contributionStatus = String(
+          draft.administrativeProgress?.[currentStatusRole?.key] ||
+          draft.administrativeProgress?.[userPost] ||
+          "",
+        ).toLowerCase();
         setContributionApproved(["approved", "submitted"].includes(contributionStatus));
       } catch (error) {
         if (isActive) setStatus(getApiErrorMessage(error, "Could not load your draft from the server."));
@@ -263,7 +307,7 @@ export default function AdministrativeAuditDashboard() {
     return () => {
       isActive = false;
     };
-  }, [userPost]);
+  }, [currentStatusRole?.key, userPost]);
 
   useEffect(() => {
     if (!reportMode || !printReportAfterRender) return undefined;
@@ -394,6 +438,10 @@ export default function AdministrativeAuditDashboard() {
       }),
       sharedAdministrativeForm: true,
       contributorPost: userPost,
+      cycleId: workflow.cycleId || undefined,
+      cycleType: workflow.cycleType || undefined,
+      reportCategory: workflow.reportCategory || undefined,
+      version: workflow.version || undefined,
       sections: modules.map((module) => module.number),
     };
   };
@@ -484,7 +532,7 @@ export default function AdministrativeAuditDashboard() {
   };
 
   const handleSubmitMyPart = async () => {
-    if (isSubmitted || contributionApproved) return;
+    if (readOnly) return;
     if (!canSubmitPart) {
       setSubmitStatus("Please confirm both declarations before submitting your part.");
       return;
@@ -510,11 +558,12 @@ export default function AdministrativeAuditDashboard() {
         confirmation: submissionConfirmation,
         isUpdate: true,
       });
-      const { data: response } = await submitAdministrativePart(academicYear);
+      const { data: response } = await submitAdministrativePart(workflow.cycleId || academicYear);
       const updatedDraft = normalizeDraft(response);
 
       setContributionApproved(true);
       setIsSubmitted(updatedDraft.isSubmitted);
+      setWorkflow(workflowFromDraft(updatedDraft));
       setData((current) => ({
         ...current,
         fields: {
@@ -583,6 +632,7 @@ export default function AdministrativeAuditDashboard() {
                 <p style={styles.meta}>{administrativeAuditMeta.address}</p>
                 <p style={styles.meta}>{administrativeAuditMeta.act}</p>
                 <p style={styles.year}>Academic Year {academicYear}</p>
+                <p style={styles.cycleLabel}>{cycleLabelFor(workflow)}</p>
               </div>
             </div>
             <div className="admin-audit-actions" style={styles.headerActions}>
@@ -606,8 +656,8 @@ export default function AdministrativeAuditDashboard() {
                 {activeModule.note && <p style={styles.moduleNote}>{activeModule.note}</p>}
               </div>
               {activeModuleId !== "submission-status" && (
-                <span style={canEditActiveModule ? styles.badge : styles.readOnlyBadge}>
-                  {canEditActiveModule ? (contributionApproved ? "Approved" : "Editable") : "Read only"}
+                <span style={canWorkOnOwnedModule ? styles.badge : styles.readOnlyBadge}>
+                  {canWorkOnOwnedModule ? "Editable" : "Read only"}
                 </span>
               )}
             </div>
@@ -620,7 +670,7 @@ export default function AdministrativeAuditDashboard() {
 
             {activeModuleId === "submission-status" ? (
               <SubmissionStatusPanel
-                academicYear={academicYear}
+                cycleId={workflow.cycleId || academicYear}
                 storedSubmissionStatus={storedAdministrativeStatusFor(data.fields)}
               />
             ) : (
@@ -686,7 +736,7 @@ export default function AdministrativeAuditDashboard() {
               })
             )}
 
-            {isFinalOwnedModule && !isSubmitted && !contributionApproved && (
+            {isFinalOwnedModule && canWorkOnOwnedModule && (
               <div style={styles.submissionConfirmationWrap}>
                 <SubmissionConfirmation
                   value={submissionConfirmation}
@@ -709,7 +759,7 @@ export default function AdministrativeAuditDashboard() {
                   Generate Report
                 </button>
               ) : isFinalOwnedModule ? (
-                !isSubmitted && !contributionApproved ? (
+                canWorkOnOwnedModule ? (
                   <>
                     <button type="button" className="btn btn-secondary" onClick={saveCurrentSection} disabled={readOnly || savingDraft || loadingDraft || submitting} aria-busy={savingDraft}>
                       {savingDraftAction === "draft" && <InlineSpinner label="Saving section" />}
@@ -1216,6 +1266,14 @@ const styles = {
     fontSize: 11,
     fontWeight: 650,
   },
+  cycleLabel: {
+    margin: "7px 0 0",
+    color: "#1d4ed8",
+    fontSize: 11,
+    fontWeight: 800,
+    textTransform: "uppercase",
+    letterSpacing: ".04em",
+  },
   headerActions: {
     display: "flex",
     gap: 10,
@@ -1542,7 +1600,7 @@ const styles = {
   },
 };
 
-function SubmissionStatusPanel({ academicYear, storedSubmissionStatus = {} }) {
+function SubmissionStatusPanel({ cycleId, storedSubmissionStatus = {} }) {
   const [statusMap, setStatusMap] = useState({
     registrar: { submitted: false, submittedAt: null, name: null, email: null },
     hr: { submitted: false, submittedAt: null, name: null, email: null },
@@ -1557,7 +1615,7 @@ function SubmissionStatusPanel({ academicYear, storedSubmissionStatus = {} }) {
 
     const loadStatus = async () => {
       try {
-        const { data: res } = await fetchAdministrativeStatus(academicYear);
+        const { data: res } = await fetchAdministrativeStatus(cycleId);
         if (!isActive) return;
 
         if (res) {
@@ -1580,7 +1638,7 @@ function SubmissionStatusPanel({ academicYear, storedSubmissionStatus = {} }) {
     return () => {
       isActive = false;
     };
-  }, [academicYear]);
+  }, [cycleId]);
 
   if (loading) {
     return <LoadingState label="Loading status..." compact />;

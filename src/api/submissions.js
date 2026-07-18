@@ -11,6 +11,15 @@ const safeJsonParse = (value, fallback) => {
   }
 };
 
+const booleanOrNull = (value) => {
+  if (value === true || value === false) return value;
+  if (value == null || value === "") return null;
+  const normalized = String(value).trim().toLowerCase();
+  if (["true", "1", "yes", "y"].includes(normalized)) return true;
+  if (["false", "0", "no", "n"].includes(normalized)) return false;
+  return null;
+};
+
 export const normalizeRole = (role = "") => String(role).trim().toLowerCase().replaceAll("_", "-");
 
 export const SIGN_OFF_FIELD = "__auditSignOff";
@@ -156,9 +165,23 @@ export const normalizeDraft = (payload = {}, fallbackValues = {}, fallbackTables
   };
   const status = String(draft.status || "").trim().toLowerCase().replaceAll("_", "-");
   const overallStatus = String(draft.overallStatus || status).trim().toLowerCase().replaceAll("_", "-");
+  const permissions = safeJsonParse(draft.permissions, {});
+  const reportCategory = normalizeRole(draft.reportCategory || draft.auditClassification || draft.approvedReportCategory || draft.category || "");
+  const cycleType = normalizeRole(draft.cycleType || draft.auditCycleType || reportCategory || "");
+  const contributionStatus = normalizeRole(
+    draft.contributionStatus ||
+    draft.myContributionStatus ||
+    draft.userContributionStatus ||
+    draft.currentContributionStatus ||
+    "",
+  );
 
   return {
     id: draft.id || draft.submissionId || null,
+    cycleId: draft.cycleId || draft.auditCycleId || draft.currentCycleId || draft.academicYear || null,
+    cycleType,
+    reportCategory,
+    version: Number(draft.version || draft.reportVersion || draft.cycleVersion || 1),
     exists: Boolean(
       draft.id ||
       draft.submissionId ||
@@ -169,6 +192,14 @@ export const normalizeDraft = (payload = {}, fallbackValues = {}, fallbackTables
     ),
     status,
     overallStatus,
+    contributionStatus,
+    canEditContribution: booleanOrNull(draft.canEditContribution ?? permissions.canEditContribution),
+    canForwardToAuditor: booleanOrNull(draft.canForwardToAuditor ?? permissions.canForwardToAuditor),
+    allContributorsSubmitted: booleanOrNull(
+      draft.allContributorsSubmitted ??
+      draft.allAdministrativeContributorsSubmitted ??
+      permissions.allContributorsSubmitted
+    ),
     isSubmitted: ["submitted", "under-review", "auditor-completed", "approved"].includes(overallStatus),
     administrativeProgress: safeJsonParse(
       draft.administrativeProgress || draft.sectionProgress || draft.contributionProgress,
