@@ -1362,8 +1362,8 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
   };
 
   const startNextAuditCycle = async (submission) => {
-    if (submission.reportCategory !== "internal" || Number(submission.version) !== 1 || submission.hasNextCycle) {
-      setError("Only an Internal Audit Version 1 report without an existing successor can start the next cycle.");
+    if (String(submission.reportCategory || "").toLowerCase() !== "internal" || submission.hasNextCycle) {
+      setError("Only an Internal Audit report without an existing successor can start the next cycle.");
       return;
     }
 
@@ -2221,7 +2221,6 @@ function PreviousReportAuditSection({
         {filteredReports.map((submission) => {
           const canStartNextCycle =
             activeCategory === "internal" &&
-            Number(submission.version) === 1 &&
             !submission.hasNextCycle;
           return (
             <SubmissionCard
