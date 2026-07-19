@@ -27,6 +27,24 @@ const hasAcademicPartEValues = (values = {}) =>
     if (value && typeof value === "object") return Object.keys(value).length > 0;
     return String(value || "").trim().length > 0;
   });
+const normalizeStatus = (value = "") => String(value).trim().toLowerCase().replaceAll("_", "-");
+const isSubmittedAuditorAssignment = (assignment = {}) =>
+  ["submitted", "completed", "auditor-completed", "approved"].includes(normalizeStatus(assignment.status)) ||
+  Boolean(assignment.submittedAt);
+const titleCase = (value = "") => String(value || "").replaceAll("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+const safeObjectValue = (value) => {
+  if (!value) return {};
+  if (typeof value === "object" && !Array.isArray(value)) return value;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
+};
 
 export default function AuditReportPanel({
   schema,
@@ -34,12 +52,14 @@ export default function AuditReportPanel({
   tables,
   submissionSchool = "",
   reportCategory = "",
+  auditorAssignments = [],
   currentAuditor = {},
   previousInternalAuditor = {},
   previousInternalValues = {},
   previousInternalMeta = "",
 }) {
   const isExternalReport = String(reportCategory).toLowerCase() === "external";
+  const submittedAuditorAssignments = auditorAssignments.filter(isSubmittedAuditorAssignment);
 
   return (
     <div className="generated-report" style={styles.panel}>
@@ -66,6 +86,16 @@ export default function AuditReportPanel({
           </div>
           {blocksFor(section).map((block, blockIndex) => {
             if (block.type === "fields") {
+              if (section.id === ACADEMIC_PART_E_SECTION_ID && submittedAuditorAssignments.length) {
+                return (
+                  <AuditorReportReviews
+                    key={`auditor-reviews-${blockIndex}`}
+                    fields={block.fields}
+                    assignments={submittedAuditorAssignments}
+                  />
+                );
+              }
+
               const showPreviousInternalPartE =
                 isExternalReport &&
                 section.id === ACADEMIC_PART_E_SECTION_ID &&
@@ -142,6 +172,33 @@ export default function AuditReportPanel({
         currentAuditor={currentAuditor}
         previousInternalAuditor={previousInternalAuditor}
       />
+    </div>
+  );
+}
+
+function AuditorReportReviews({ fields, assignments }) {
+  const visibleFields = fields.filter((field) => field.kind !== "heading");
+  return (
+    <div style={styles.auditorReportGrid}>
+      {assignments.map((assignment, index) => {
+        const values = safeObjectValue(assignment.values || assignment.valuesData || assignment.reviewValues || assignment.reviewValuesData);
+        return (
+          <section key={assignment.key || `${assignment.auditorId}-${assignment.school || assignment.post}-${index}`} style={styles.auditorReportCard}>
+            <div style={styles.auditorReportHeader}>
+              <div>
+                <h3 style={styles.auditorReportTitle}>Auditor {index + 1}: {assignment.auditorName || assignment.name || "Auditor"}</h3>
+                {(assignment.auditorEmail || assignment.email) && <p style={styles.auditorReportMeta}>{assignment.auditorEmail || assignment.email}</p>}
+              </div>
+              <div style={styles.auditorReportChips}>
+                <span>{titleCase(assignment.auditorType || "auditor")}</span>
+                <span>{titleCase(assignment.school || assignment.post || "Assigned Review")}</span>
+                <span>{assignment.submittedAt ? `Submitted ${formatDateDDMMYYYY(assignment.submittedAt)}` : "Submitted"}</span>
+              </div>
+            </div>
+            <ReportFieldsTable fields={visibleFields} values={values} />
+          </section>
+        );
+      })}
     </div>
   );
 }
@@ -310,6 +367,41 @@ const styles = {
   detailHeading: { padding: "9px 12px", border: "1px solid #cbd5e1", color: "#1e3a8a", background: "#eff6ff", fontSize: 12, textAlign: "left" },
   detailLabel: { width: "36%", padding: "9px 12px", border: "1px solid #dbe3ef", color: "#475569", background: "#f8fafc", fontSize: 11, fontWeight: 700, textAlign: "left", verticalAlign: "top" },
   detailValue: { padding: "9px 12px", border: "1px solid #dbe3ef", color: "#0f172a", background: "#fff", fontSize: 11.5, whiteSpace: "pre-wrap", verticalAlign: "top" },
+  auditorReportGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))",
+    gap: 12,
+  },
+  auditorReportCard: {
+    breakInside: "avoid",
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+    border: "1px solid #dbe3ef",
+    borderRadius: 8,
+    padding: 12,
+    background: "#fbfdff",
+  },
+  auditorReportHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 10,
+    paddingBottom: 10,
+    borderBottom: "1px solid #e2e8f0",
+    flexWrap: "wrap",
+  },
+  auditorReportTitle: { margin: 0, color: "#0f172a", fontSize: 13.5, fontWeight: 900 },
+  auditorReportMeta: { margin: "3px 0 0", color: "#64748b", fontSize: 11.5, fontWeight: 700 },
+  auditorReportChips: {
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "flex-end",
+    flexWrap: "wrap",
+    gap: 6,
+    color: "#1d4ed8",
+    fontSize: 10.5,
+    fontWeight: 850,
+  },
   partEReportComparison: {
     display: "flex",
     flexDirection: "column",

@@ -142,6 +142,12 @@ const nextAcademicYearFor = (value) => {
   const [startYear, endYear] = normalizeAcademicYear(value).split("-").map(Number);
   return `${startYear + 1}-${endYear + 1}`;
 };
+const reportVersionForCategory = (category = "", fallbackVersion = 1) => {
+  const normalized = normalizeUserRole(category);
+  if (normalized === "internal") return 1;
+  if (normalized === "external") return 2;
+  return Number(fallbackVersion || 1);
+};
 const compactAcademicYear = (value) => {
   const [startYear, endYear] = normalizeAcademicYear(value).split("-");
   return `${startYear}-${endYear.slice(-2)}`;
@@ -592,8 +598,8 @@ const normalizeAuditorAssignment = (assignment = {}, index = 0) => {
     school: assignment.school || assignment.schoolName || "",
     status,
     submittedAt,
-    values: assignment.values || assignment.valuesData || null,
-    attachments: assignment.attachments || [],
+    values: safeObjectValue(assignment.values || assignment.valuesData || assignment.reviewValues || assignment.reviewValuesData),
+    attachments: arrayValue(assignment.attachments),
   };
 };
 const auditorAssignmentSubmitted = (assignment = {}) =>
@@ -1154,13 +1160,14 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
     try {
       const reviewedOn = new Date().toISOString();
       const reviewer = { ...profile, role };
+      const approvedVersion = reportVersionForCategory(reportCategory, submission.version);
       const baseSignedValues = withApproverSignOff(submission.values, reviewer, reviewedOn);
       const signedValues = {
         ...baseSignedValues,
         [REPORT_ARCHIVE_FIELD]: {
           category: reportCategory,
           auditCycle: submission.auditCycle,
-          version: submission.version,
+          version: approvedVersion,
           approvedOn: reviewedOn,
         },
       };
@@ -1175,8 +1182,17 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
         status: backendStatusFor("approved"),
         remarks: submission.remarks,
         reportCategory: reportCategory.toUpperCase(),
+        auditClassification: reportCategory.toUpperCase(),
+        approvedReportCategory: reportCategory.toUpperCase(),
+        category: reportCategory.toUpperCase(),
+        auditorType: reportCategory.toUpperCase(),
+        forwardedAuditorType: reportCategory.toUpperCase(),
+        cycleType: reportCategory.toUpperCase(),
+        auditCycleType: reportCategory.toUpperCase(),
         auditCycle: submission.auditCycle,
-        version: submission.version,
+        version: approvedVersion,
+        reportVersion: approvedVersion,
+        cycleVersion: approvedVersion,
         valuesData,
         tablesData,
         attachments,
@@ -1190,6 +1206,13 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
         reviewedByRole: role,
         reviewedOn,
         reportCategory,
+        auditClassification: reportCategory,
+        approvedReportCategory: reportCategory,
+        auditorType: reportCategory,
+        forwardedAuditorType: reportCategory,
+        cycleType: reportCategory,
+        auditCycleType: reportCategory,
+        version: approvedVersion,
       });
 
       setApprovalTarget(null);
@@ -1204,11 +1227,19 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
   };
 
   const openApprovalModal = (submission) => {
+    const submittedAuditorTypes = uniqueValues(
+      (submission.auditorAssignments || [])
+        .filter(auditorAssignmentSubmitted)
+        .map((assignment) => normalizeUserRole(assignment.auditorType))
+        .filter((type) => ["internal", "external"].includes(type))
+    );
+    const inferredAuditorType = submittedAuditorTypes.length === 1 ? submittedAuditorTypes[0] : "";
     setApprovalTarget(submission);
     setApprovalCategory(
-      ["internal", "external"].includes(submission.forwardedAuditorType)
+      inferredAuditorType ||
+      (["internal", "external"].includes(submission.forwardedAuditorType)
         ? submission.forwardedAuditorType
-        : "",
+        : ""),
     );
   };
 
@@ -2415,6 +2446,7 @@ function FullFormReview({
               tables={submission.tables}
               submissionSchool={submission.school}
               reportCategory={submission.reportCategory}
+              auditorAssignments={submission.auditorAssignments || []}
               currentAuditor={currentAuditor}
               previousInternalAuditor={previousInternalAuditor}
               previousInternalValues={previousInternalReport?.values}
@@ -2431,6 +2463,7 @@ function FullFormReview({
             modules={administrativeAuditModules}
             data={{ fields: submission.values, tables: submission.tables }}
             reportCategory={submission.reportCategory}
+            auditorAssignments={submission.auditorAssignments || []}
             currentAuditor={currentAuditor}
             previousInternalAuditor={previousInternalAuditor}
             onClose={() => setReportMode(false)}
@@ -2501,6 +2534,7 @@ function FullFormReview({
         onFieldChange={handleAuditorFieldChange}
         onFileUpload={handleAuditorFileUpload}
         onFileDelete={handleAuditorFileDelete}
+        auditorAssignments={submission.auditorAssignments || []}
         previousInternalPartEValues={previousInternalPartE?.values}
         previousInternalPartEMeta={
           previousInternalPartE
@@ -2674,14 +2708,21 @@ function SubmittedFormViewer({
   onFieldChange,
   onFileUpload,
   onFileDelete,
+  auditorAssignments = [],
   previousInternalPartEValues,
   previousInternalPartEMeta = "",
 }) {
   const activeSection = sections[activeSectionIndex] || sections[0];
+  const activeSectionIsAuditorOwned = activeSection ? isAuditorSection(activeSection, auditType) : false;
+  const submittedAuditorAssignments = auditorAssignments.filter(auditorAssignmentSubmitted);
   const showPreviousInternalPartE =
     auditType === "academic" &&
     activeSection?.id === ACADEMIC_PART_E_SECTION_ID &&
     hasAcademicPartEValues(previousInternalPartEValues);
+  const showSubmittedAuditorReviews =
+    activeSectionIsAuditorOwned &&
+    !editableSection &&
+    submittedAuditorAssignments.length > 0;
 
   return (
     <div style={styles.formViewer}>
@@ -2700,6 +2741,17 @@ function SubmittedFormViewer({
 
           {blocksFor(activeSection).map((block, blockIndex) => {
             if (block.type === "fields") {
+              if (showSubmittedAuditorReviews) {
+                return (
+                  <AuditorAssignmentReviewGrid
+                    key={`${activeSection.id}-auditor-reviews-${blockIndex}`}
+                    fields={block.fields}
+                    assignments={submittedAuditorAssignments}
+                    fallbackAuditorType={auditType}
+                  />
+                );
+              }
+
               const currentFields = editableSection ? (
                 <EditableFieldGrid
                   key={`${activeSection.id}-fields-${blockIndex}`}
@@ -2942,6 +2994,47 @@ function ReadOnlyFieldGrid({ fields, values }) {
   );
 }
 
+function AuditorAssignmentReviewGrid({ fields, assignments, fallbackAuditorType }) {
+  const visibleFields = fields.filter((field) => field.kind !== "heading");
+  return (
+    <div className="review-auditor-review-stack" style={styles.auditorReviewStack}>
+      {assignments.map((assignment, index) => {
+        const values = safeObjectValue(assignment.values);
+        return (
+          <section key={assignment.key} style={styles.auditorReviewCard}>
+            <div style={styles.auditorReviewCardHeader}>
+              <div style={styles.auditorReviewIdentity}>
+                <span style={styles.auditorReviewNumber}>Auditor {index + 1}</span>
+                <div style={styles.auditorReviewNameBlock}>
+                  <h4 style={styles.auditorReviewTitle}>{assignment.auditorName || "Auditor Review"}</h4>
+                  {assignment.auditorEmail && <p style={styles.auditorReviewEmail}>{assignment.auditorEmail}</p>}
+                </div>
+              </div>
+              <div style={styles.auditorReviewChips}>
+                <span style={styles.auditorReviewChip}>{titleCase(assignment.auditorType || fallbackAuditorType || "auditor")}</span>
+                <span style={styles.auditorReviewChip}>{auditorAssignmentLabel(assignment.post || assignment.school)}</span>
+                <span style={styles.auditorProgressDone}>
+                  {assignment.submittedAt ? `Submitted ${formatDate(assignment.submittedAt)}` : "Submitted"}
+                </span>
+              </div>
+            </div>
+            <div className="review-auditor-review-fields" style={styles.auditorReviewFieldGrid}>
+              {visibleFields.map((field) => (
+                <div key={field.id} style={field.type === "file" ? styles.auditorReviewDocsField : styles.auditorReviewField}>
+                  <div style={styles.readOnlyLabel}>{field.label}</div>
+                  <div style={field.type === "file" ? styles.auditorReviewDocsValue : styles.auditorReviewValue}>
+                    {renderValue(values[field.id])}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
 function ReadOnlyTable({ table, rows, values }) {
   const columns = columnsWithSerial(table.columns);
   const visibleRows = rows.length ? rows : [columns.reduce((row, column) => ({ ...row, [column]: "" }), {})];
@@ -3139,6 +3232,7 @@ function AuditorProgressPanel({ submission, compact = false }) {
               <div key={assignment.key} className="review-auditor-assignment-row" style={styles.auditorAssignmentRow}>
                 <div style={styles.auditorAssignmentMain}>
                   <strong>{assignment.auditorName}</strong>
+                  {assignment.auditorEmail && <span>{assignment.auditorEmail}</span>}
                   <span>
                     {titleCase(assignment.auditorType || submission.forwardedAuditorType || "auditor")} - {auditorAssignmentLabel(assignment.post || assignment.school)}
                   </span>
@@ -3216,6 +3310,7 @@ function NextAcademicYearModal({ currentAcademicYear, nextAcademicYear, loading,
 }
 
 function ApprovalCategoryModal({ submission, selectedCategory, onCategoryChange, approving, onApprove, onCancel }) {
+  const archiveVersion = reportVersionForCategory(selectedCategory || submission.forwardedAuditorType || submission.reportCategory, submission.version);
   return (
     <div style={styles.modalBackdrop} onClick={approving ? undefined : onCancel}>
       <div style={styles.forwardModal} onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="approval-category-title">
@@ -3259,7 +3354,7 @@ function ApprovalCategoryModal({ submission, selectedCategory, onCategoryChange,
         </div>
 
         <div style={styles.approvalArchiveNote}>
-          Approval creates an immutable Version {submission.version} historical report. Starting another cycle will create a linked successor.
+          Approval creates an immutable Version {archiveVersion} historical report. Starting another cycle will create a linked successor.
         </div>
 
         <div style={styles.forwardFooter}>
@@ -3551,6 +3646,10 @@ function PrintStyles() {
       }
       @media (max-width: 700px) {
         .review-auditor-assignment-row {
+          grid-template-columns: 1fr !important;
+        }
+        .review-auditor-review-stack,
+        .review-auditor-review-fields {
           grid-template-columns: 1fr !important;
         }
       }
@@ -4157,6 +4256,131 @@ const styles = {
     color: "#64748b",
     fontSize: 11,
     fontWeight: 700,
+  },
+  auditorReviewStack: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))",
+    gap: 12,
+    alignItems: "stretch",
+  },
+  auditorReviewCard: {
+    display: "grid",
+    gridTemplateRows: "auto 1fr",
+    gap: 10,
+    alignSelf: "stretch",
+    height: "100%",
+    border: "1px solid #dbe3ef",
+    borderRadius: 8,
+    background: "#fff",
+    padding: 12,
+    boxShadow: "0 8px 20px rgba(15, 23, 42, .045)",
+  },
+  auditorReviewCardHeader: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-start",
+    justifyContent: "flex-start",
+    gap: 9,
+    minHeight: 76,
+    borderBottom: "1px solid #eef2f7",
+    paddingBottom: 10,
+  },
+  auditorReviewIdentity: {
+    minWidth: 0,
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+  },
+  auditorReviewNumber: {
+    flexShrink: 0,
+    border: "1px solid #bfdbfe",
+    borderRadius: 8,
+    background: "#eff6ff",
+    color: "#1d4ed8",
+    padding: "7px 9px",
+    fontSize: 11,
+    fontWeight: 900,
+  },
+  auditorReviewNameBlock: {
+    minWidth: 0,
+  },
+  auditorReviewChips: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "flex-start",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  auditorReviewChip: {
+    border: "1px solid #e2e8f0",
+    borderRadius: 999,
+    background: "#f8fafc",
+    color: "#334155",
+    padding: "5px 8px",
+    fontSize: 10.5,
+    fontWeight: 800,
+  },
+  auditorReviewTitle: {
+    margin: 0,
+    color: "#0f172a",
+    fontSize: 14,
+    fontWeight: 850,
+    lineHeight: 1.25,
+  },
+  auditorReviewEmail: {
+    margin: "2px 0 0",
+    color: "#64748b",
+    fontSize: 11.5,
+    fontWeight: 700,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  auditorReviewFieldGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gridAutoRows: "minmax(116px, auto)",
+    gap: 10,
+    alignContent: "start",
+  },
+  auditorReviewField: {
+    minWidth: 0,
+    display: "flex",
+    flexDirection: "column",
+    gap: 5,
+  },
+  auditorReviewDocsField: {
+    minWidth: 0,
+    display: "flex",
+    flexDirection: "column",
+    gap: 5,
+    gridColumn: "1 / -1",
+    minHeight: 128,
+  },
+  auditorReviewValue: {
+    width: "100%",
+    minHeight: 78,
+    maxHeight: 132,
+    overflow: "auto",
+    border: "1px solid #d7dee9",
+    borderRadius: 8,
+    padding: "9px 10px",
+    color: "#0f172a",
+    background: "#fbfcfe",
+    fontSize: 12.5,
+    whiteSpace: "pre-wrap",
+    overflowWrap: "anywhere",
+    lineHeight: 1.45,
+  },
+  auditorReviewDocsValue: {
+    width: "100%",
+    minHeight: 44,
+    border: "1px solid #d7dee9",
+    borderRadius: 8,
+    padding: 8,
+    color: "#0f172a",
+    background: "#fbfcfe",
+    fontSize: 12.5,
   },
   remarksLabel: {
     display: "flex",
