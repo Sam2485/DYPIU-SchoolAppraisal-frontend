@@ -12,6 +12,26 @@ const moduleBlocksFor = (module) =>
 
 const isOmittedReportText = (value) =>
   String(value || "").trim().toLowerCase() === "reviewers (vc & iqac) cannot create or submit audits";
+const normalizeStatus = (value = "") => String(value).trim().toLowerCase().replaceAll("_", "-");
+const isSubmittedAuditorAssignment = (assignment = {}) =>
+  ["submitted", "completed", "auditor-completed", "approved"].includes(normalizeStatus(assignment.status)) ||
+  Boolean(assignment.submittedAt);
+const titleCase = (value = "") => String(value || "").replaceAll("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+const safeObjectValue = (value) => {
+  if (!value) return {};
+  if (typeof value === "object" && !Array.isArray(value)) return value;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
+};
+const isAuditorModule = (module = {}) =>
+  module.number === "F" || /^Part\s+F\b/i.test(module.title || "") || String(module.id || "").includes("observations-recommendations");
 
 export default function AdministrativeReportPanel({
   meta,
@@ -19,9 +39,11 @@ export default function AdministrativeReportPanel({
   data,
   onClose,
   reportCategory = "",
+  auditorAssignments = [],
   currentAuditor = {},
   previousInternalAuditor = {},
 }) {
+  const submittedAuditorAssignments = auditorAssignments.filter(isSubmittedAuditorAssignment);
   return (
     <div className="generated-report" style={styles.panel}>
       <div className="generated-report__cover" style={styles.header}>
@@ -58,6 +80,15 @@ export default function AdministrativeReportPanel({
 
             {moduleBlocksFor(module).map((block, index) => {
               if (block.type === "fields") {
+                if (isAuditorModule(module) && submittedAuditorAssignments.length) {
+                  return (
+                    <AuditorReportReviews
+                      key={`auditor-reviews-${index}`}
+                      fields={block.fields}
+                      assignments={submittedAuditorAssignments}
+                    />
+                  );
+                }
                 return (
                   <ReportFieldsTable key={`fields-${index}`} fields={block.fields} values={data.fields} />
                 );
@@ -143,6 +174,33 @@ export default function AdministrativeReportPanel({
           previousInternalAuditor={previousInternalAuditor}
         />
       </div>
+    </div>
+  );
+}
+
+function AuditorReportReviews({ fields, assignments }) {
+  const visibleFields = fields.filter((field) => field.kind !== "heading");
+  return (
+    <div style={styles.auditorReportGrid}>
+      {assignments.map((assignment, index) => {
+        const values = safeObjectValue(assignment.values || assignment.valuesData || assignment.reviewValues || assignment.reviewValuesData);
+        return (
+          <section key={assignment.key || `${assignment.auditorId}-${assignment.post}-${index}`} style={styles.auditorReportCard}>
+            <div style={styles.auditorReportHeader}>
+              <div>
+                <h4 style={styles.auditorReportTitle}>Auditor {index + 1}: {assignment.auditorName || assignment.name || "Auditor"}</h4>
+                {(assignment.auditorEmail || assignment.email) && <p style={styles.auditorReportMeta}>{assignment.auditorEmail || assignment.email}</p>}
+              </div>
+              <div style={styles.auditorReportChips}>
+                <span>{titleCase(assignment.auditorType || "auditor")}</span>
+                <span>{titleCase(assignment.post || assignment.school || "Assigned Review")}</span>
+                <span>{assignment.submittedAt ? `Submitted ${formatDateDDMMYYYY(assignment.submittedAt)}` : "Submitted"}</span>
+              </div>
+            </div>
+            <ReportFieldsTable fields={visibleFields} values={values} />
+          </section>
+        );
+      })}
     </div>
   );
 }
@@ -333,6 +391,41 @@ const styles = {
   detailHeading: { padding: "9px 12px", border: "1px solid #cbd5e1", color: "#1e3a8a", background: "#eff6ff", fontSize: 12, textAlign: "left" },
   detailLabel: { width: "36%", padding: "9px 12px", border: "1px solid #dbe3ef", color: "#475569", background: "#f8fafc", fontSize: 11, fontWeight: 700, textAlign: "left", verticalAlign: "top" },
   detailValue: { padding: "9px 12px", border: "1px solid #dbe3ef", color: "#0f172a", background: "#fff", fontSize: 11.5, whiteSpace: "pre-wrap", verticalAlign: "top" },
+  auditorReportGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))",
+    gap: 12,
+  },
+  auditorReportCard: {
+    breakInside: "avoid",
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+    border: "1px solid #dbe3ef",
+    borderRadius: 8,
+    padding: 12,
+    background: "#fbfdff",
+  },
+  auditorReportHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 10,
+    paddingBottom: 10,
+    borderBottom: "1px solid #e2e8f0",
+    flexWrap: "wrap",
+  },
+  auditorReportTitle: { margin: 0, color: "#0f172a", fontSize: 13.5, fontWeight: 900 },
+  auditorReportMeta: { margin: "3px 0 0", color: "#64748b", fontSize: 11.5, fontWeight: 700 },
+  auditorReportChips: {
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "flex-end",
+    flexWrap: "wrap",
+    gap: 6,
+    color: "#1d4ed8",
+    fontSize: 10.5,
+    fontWeight: 850,
+  },
   moduleNote: {
     margin: "-6px 0 14px",
     color: "#475569",
