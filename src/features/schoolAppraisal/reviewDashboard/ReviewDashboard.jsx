@@ -581,7 +581,15 @@ const assignmentSourceList = (source) => {
   );
 };
 const normalizeAuditorAssignment = (assignment = {}, index = 0) => {
-  const auditorId = String(assignment.auditorId || assignment.userId || assignment.id || "");
+  const auditor = safeObjectValue(assignment.auditor || assignment.user || assignment.reviewer);
+  const auditorId = String(
+    assignment.auditorId ||
+    assignment.userId ||
+    assignment.id ||
+    auditor.id ||
+    auditor.userId ||
+    "",
+  );
   const post = canonicalAdministrativePost(
     assignment.post || assignment.rolePost || assignment.administrativePost || assignment.assignment || "",
   );
@@ -590,9 +598,9 @@ const normalizeAuditorAssignment = (assignment = {}, index = 0) => {
   return {
     key: assignment.key || assignment.assignmentId || `${auditorId || "auditor"}-${post || "assignment"}-${index}`,
     auditorId,
-    auditorName: assignment.auditorName || assignment.name || assignment.fullName || "-",
-    auditorEmail: assignment.auditorEmail || assignment.email || assignment.username || "",
-    auditorType: normalizeUserRole(assignment.auditorType || assignment.type || ""),
+    auditorName: assignment.auditorName || assignment.name || assignment.fullName || auditor.name || auditor.fullName || "-",
+    auditorEmail: assignment.auditorEmail || assignment.email || assignment.username || auditor.email || auditor.username || "",
+    auditorType: normalizeUserRole(assignment.auditorType || assignment.type || auditor.auditorType || auditor.auditorCategory || ""),
     auditCategory: normalizeAuditType(assignment.auditCategory || assignment.category || "administrative"),
     post,
     school: assignment.school || assignment.schoolName || "",
@@ -634,14 +642,31 @@ const buildAuditorProgress = (assignments = []) => {
   }, {});
   return { total, submitted, pending, allSubmitted: total > 0 && pending === 0, byPost: Object.values(byPost) };
 };
-const auditorAssignmentsForCurrentUser = (submission = {}, profile = {}) => {
+const auditorAssignmentMatchesProfile = (assignment = {}, submission = {}, profile = {}) => {
   const userId = String(profile.id || sessionStorage.getItem("userId") || "");
   const email = normalizeAuditAssignment(profile.email || sessionStorage.getItem("email") || sessionStorage.getItem("username") || "");
-  return (submission.auditorAssignments || []).filter((assignment) =>
-    (userId && String(assignment.auditorId) === userId) ||
-    (email && normalizeAuditAssignment(assignment.auditorEmail) === email)
+  const idMatches = userId && String(assignment.auditorId) === userId;
+  const emailMatches = email && normalizeAuditAssignment(assignment.auditorEmail) === email;
+  if (idMatches || emailMatches) return true;
+
+  const profileType = normalizeUserRole(profile.auditorType || auditorTypeFromRole(profile.role));
+  const assignmentType = normalizeUserRole(assignment.auditorType);
+  if (assignmentType && profileType && assignmentType !== profileType) return false;
+
+  if (submission.auditType === "academic") {
+    return assignmentMatches(profile.school, assignment.school || submission.school, schoolAliasesFor);
+  }
+
+  const profilePosts = administrativePostsFor(profile);
+  return Boolean(
+    assignment.post &&
+    profilePosts.some((post) => assignmentMatches(post, assignment.post, postAliasesFor))
   );
 };
+const auditorAssignmentsForCurrentUser = (submission = {}, profile = {}) =>
+  (submission.auditorAssignments || []).filter((assignment) =>
+    auditorAssignmentMatchesProfile(assignment, submission, profile)
+  );
 const currentAuditorSubmitted = (submission = {}, profile = {}) => {
   const assignments = auditorAssignmentsForCurrentUser(submission, profile);
   return assignments.length > 0 && assignments.every(auditorAssignmentSubmitted);
@@ -1529,6 +1554,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
       const signedValues = withAuditorSignOff(values, profile, auditorReviewedOn);
       const assignedPosts = auditorPostsForCurrentSubmission(submission, profile);
       const currentAssignments = auditorAssignmentsForCurrentUser(submission, profile);
+      const assignmentKeys = currentAssignments.map((assignment) => assignment.key).filter(Boolean);
       const { valuesData, tablesData, attachments } = buildSubmissionPayload({
           auditType: submission.auditType,
           values: signedValues,
@@ -1545,7 +1571,14 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
         auditorType: profile.auditorType || auditorTypeFromRole(profile.role),
         auditCategory: submission.auditType,
         postsSubmitted: assignedPosts,
-        assignmentKeys: currentAssignments.map((assignment) => assignment.key).filter(Boolean),
+        submittedPosts: assignedPosts,
+        administrativePosts: assignedPosts,
+        assignedPosts,
+        posts: assignedPosts,
+        post: assignedPosts[0] || "",
+        postSubmitted: assignedPosts[0] || "",
+        assignmentKeys,
+        auditorAssignmentKeys: assignmentKeys,
         submittedAt: auditorReviewedOn,
         reviewStatus: "submitted",
         valuesData,
