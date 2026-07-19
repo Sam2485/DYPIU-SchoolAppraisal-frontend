@@ -13,6 +13,7 @@ import {
   parseSubmissionFormData,
   reviewSubmission,
   startNextAcademicYear,
+  submitAuditorReview,
   updateSubmissionById,
   uploadAttachments,
   deleteAttachment,
@@ -58,6 +59,7 @@ const PREVIOUS_REPORTS_NAV_ITEM = {
 const USER_MANAGEMENT_NAV_ITEM = { id: "user-management", title: "User Management" };
 const REPORT_ARCHIVE_FIELD = "__reportArchive";
 const ADMIN_SUBMISSION_STATUS_FIELD = "__administrativeSubmissionStatus";
+const AUDITOR_ASSIGNMENT_STATUS_FIELD = "__auditorAssignmentStatus";
 const START_NEXT_YEAR_NAV_ITEM = {
   id: "start-next-academic-year",
   title: "Start Next Academic Year",
@@ -298,6 +300,7 @@ const clearAcademicPartEValues = (values = {}) => ({
   auditRecommendations: "",
   auditDocumentation: [],
 });
+const hidePendingAuditorReviewValues = clearAcademicPartEValues;
 const removeMatchingPartEAttachments = (attachments = [], previousValues = {}) => {
   const previousAttachmentKeys = new Set(
     valueList(previousValues.auditDocumentation)
@@ -342,6 +345,7 @@ const isAuditorCorrectionRequested = (submission = {}) =>
 const isAuditorCompleted = (submission = {}) =>
   !["submitted", "under-review"].includes(submission.status) &&
   !isAuditorCorrectionRequested(submission) &&
+  !(submission.auditorProgress?.total > 0 && !submission.auditorProgress.allSubmitted) &&
   (
     ["auditor-completed", "approved"].includes(submission.status) ||
     Boolean(submission.auditorReviewedOn || submission.auditorReviewedBy || getAuditorSignOff(submission.values).date)
@@ -531,6 +535,162 @@ const administrativeSubmittedPostsFor = (submission = {}) => {
     return key;
   }));
 };
+const arrayValue = (value) => {
+  if (Array.isArray(value)) return value.filter(Boolean);
+  if (!value) return [];
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed.filter(Boolean);
+      if (parsed && typeof parsed === "object") return [parsed];
+    } catch {
+      return [];
+    }
+  }
+  if (typeof value === "object") return [value];
+  return [];
+};
+const canonicalAdministrativePost = (value = "") => {
+  const normalized = normalizeAuditAssignment(value);
+  if (!normalized) return "";
+  const option = ADMINISTRATIVE_POSTS.find((post) =>
+    normalizeAuditAssignment(post.value) === normalized ||
+    normalizeAuditAssignment(post.label) === normalized
+  );
+  return option?.value || String(value);
+};
+const assignmentSourceList = (source) => {
+  if (!source) return [];
+  if (Array.isArray(source) || typeof source === "string") return arrayValue(source);
+  if (typeof source !== "object") return [];
+
+  const direct = arrayValue(source.assignments || source.auditorAssignments || source.reviews || source.items);
+  if (direct.length) return direct;
+
+  return Object.entries(source).flatMap(([group, value]) =>
+    arrayValue(value).map((item) => ({
+      ...item,
+      auditorType: item.auditorType || item.type || group,
+    }))
+  );
+};
+const normalizeAuditorAssignment = (assignment = {}, index = 0) => {
+  const auditorId = String(assignment.auditorId || assignment.userId || assignment.id || "");
+  const post = canonicalAdministrativePost(
+    assignment.post || assignment.rolePost || assignment.administrativePost || assignment.assignment || "",
+  );
+  const submittedAt = assignment.submittedAt || assignment.reviewedAt || assignment.completedAt || "";
+  const status = normalizeStatus(assignment.status || assignment.reviewStatus || (submittedAt ? "submitted" : "pending"));
+  return {
+    key: assignment.key || assignment.assignmentId || `${auditorId || "auditor"}-${post || "assignment"}-${index}`,
+    auditorId,
+    auditorName: assignment.auditorName || assignment.name || assignment.fullName || "-",
+    auditorEmail: assignment.auditorEmail || assignment.email || assignment.username || "",
+    auditorType: normalizeUserRole(assignment.auditorType || assignment.type || ""),
+    auditCategory: normalizeAuditType(assignment.auditCategory || assignment.category || "administrative"),
+    post,
+    school: assignment.school || assignment.schoolName || "",
+    status,
+    submittedAt,
+    values: assignment.values || assignment.valuesData || null,
+    attachments: assignment.attachments || [],
+  };
+};
+const auditorAssignmentSubmitted = (assignment = {}) =>
+  ["submitted", "completed", "auditor-completed", "approved"].includes(normalizeStatus(assignment.status)) ||
+  Boolean(assignment.submittedAt);
+const normalizeAuditorAssignments = (submission = {}, values = {}) => {
+  const progressSource = submission.auditorProgress;
+  const progressHasAssignments = Array.isArray(progressSource) ||
+    Array.isArray(progressSource?.assignments) ||
+    Array.isArray(progressSource?.auditorAssignments) ||
+    Array.isArray(progressSource?.reviews) ||
+    Array.isArray(progressSource?.items);
+  const source = submission.auditorAssignments ||
+    submission.auditorAssignmentStatus ||
+    (progressHasAssignments ? progressSource : null) ||
+    submission.auditorReviews ||
+    values[AUDITOR_ASSIGNMENT_STATUS_FIELD];
+  return assignmentSourceList(source).map(normalizeAuditorAssignment);
+};
+const buildAuditorProgress = (assignments = []) => {
+  const total = assignments.length;
+  const submitted = assignments.filter(auditorAssignmentSubmitted).length;
+  const pending = Math.max(total - submitted, 0);
+  const byPost = assignments.reduce((posts, assignment) => {
+    const postKey = assignment.post || assignment.school || "general";
+    const current = posts[postKey] || { post: postKey, total: 0, submitted: 0, pending: 0 };
+    current.total += 1;
+    if (auditorAssignmentSubmitted(assignment)) current.submitted += 1;
+    current.pending = current.total - current.submitted;
+    posts[postKey] = current;
+    return posts;
+  }, {});
+  return { total, submitted, pending, allSubmitted: total > 0 && pending === 0, byPost: Object.values(byPost) };
+};
+const auditorAssignmentsForCurrentUser = (submission = {}, profile = {}) => {
+  const userId = String(profile.id || sessionStorage.getItem("userId") || "");
+  const email = normalizeAuditAssignment(profile.email || sessionStorage.getItem("email") || sessionStorage.getItem("username") || "");
+  return (submission.auditorAssignments || []).filter((assignment) =>
+    (userId && String(assignment.auditorId) === userId) ||
+    (email && normalizeAuditAssignment(assignment.auditorEmail) === email)
+  );
+};
+const currentAuditorSubmitted = (submission = {}, profile = {}) => {
+  const assignments = auditorAssignmentsForCurrentUser(submission, profile);
+  return assignments.length > 0 && assignments.every(auditorAssignmentSubmitted);
+};
+const auditorPostsForCurrentSubmission = (submission = {}, profile = {}) => {
+  const assignedPosts = auditorAssignmentsForCurrentUser(submission, profile).map((assignment) => assignment.post).filter(Boolean);
+  if (assignedPosts.length) return uniqueValues(assignedPosts);
+  if (submission.auditType === "administrative") {
+    const submittedPosts = administrativeSubmittedPostsFor(submission);
+    const profilePosts = administrativePostsFor(profile);
+    if (submittedPosts.length) {
+      return profilePosts.filter((post) =>
+        submittedPosts.some((submittedPost) => assignmentMatches(post, submittedPost, postAliasesFor))
+      );
+    }
+    return profilePosts;
+  }
+  return [];
+};
+const buildAuditorAssignmentsForForwarding = (submission = {}, auditorType = "", matchingAuditors = []) => {
+  if (submission.auditType === "academic") {
+    return matchingAuditors.map((auditor, index) => ({
+      key: `${auditor.id}-${submission.school || "school"}-${index}`,
+      auditorId: auditor.id,
+      auditorName: auditor.name,
+      auditorEmail: auditor.email,
+      auditorType,
+      auditCategory: "academic",
+      school: submission.school,
+      post: "",
+      status: "pending",
+      submittedAt: null,
+    }));
+  }
+
+  const submittedPosts = administrativeSubmittedPostsFor(submission);
+  return matchingAuditors.flatMap((auditor) => {
+    const matchedPosts = administrativePostsFor(auditor).filter((auditorPost) =>
+      !submittedPosts.length ||
+      submittedPosts.some((submittedPost) => assignmentMatches(auditorPost, submittedPost, postAliasesFor))
+    );
+    return matchedPosts.map((post) => ({
+      key: `${auditor.id}-${post}`,
+      auditorId: auditor.id,
+      auditorName: auditor.name,
+      auditorEmail: auditor.email,
+      auditorType,
+      auditCategory: "administrative",
+      post,
+      school: "",
+      status: "pending",
+      submittedAt: null,
+    }));
+  });
+};
 const auditCategoryFromRole = (role = "") => role.includes("administrative") ? "administrative" : role.includes("academic") ? "academic" : "";
 const auditorTypeFromRole = (role = "") => role.includes("external") ? "external" : role.includes("internal") ? "internal" : "";
 const normalizeAuditor = (user = {}, index = 0) => {
@@ -659,6 +819,22 @@ const normalizeSubmission = (submission = {}) => {
   const administrativeProgress = safeObjectValue(
     submission.administrativeProgress || submission.sectionProgress || submission.contributionProgress,
   );
+  const auditorAssignments = normalizeAuditorAssignments(submission, values);
+  const backendAuditorProgress = safeObjectValue(submission.auditorProgress);
+  const computedAuditorProgress = buildAuditorProgress(auditorAssignments);
+  const auditorProgress = auditorAssignments.length
+    ? computedAuditorProgress
+    : {
+        total: Number(backendAuditorProgress.total || backendAuditorProgress.required || 0),
+        submitted: Number(backendAuditorProgress.submitted || backendAuditorProgress.completed || 0),
+        pending: Number(backendAuditorProgress.pending || 0),
+        allSubmitted: Boolean(backendAuditorProgress.allSubmitted || backendAuditorProgress.allAuditorsSubmitted),
+        byPost: arrayValue(backendAuditorProgress.byPost || backendAuditorProgress.posts),
+      };
+  if (auditorProgress.total && !auditorProgress.pending) {
+    auditorProgress.pending = Math.max(auditorProgress.total - auditorProgress.submitted, 0);
+  }
+  if (auditorProgress.total) auditorProgress.allSubmitted = auditorProgress.pending === 0;
   const permissions = safeObjectValue(submission.permissions);
   const status = normalizeStatus(submission.status);
   const overallStatus = normalizeStatus(submission.overallStatus || submission.workflowStatus || status);
@@ -672,6 +848,8 @@ const normalizeSubmission = (submission = {}) => {
     group: normalizeSchoolGroup(submission.group || submission.schoolGroup, school, auditType),
     school,
     administrativeProgress,
+    auditorAssignments,
+    auditorProgress,
     submittedBy: signOff.submittedBy.name || submission.userName || "-",
     submittedByDesignation: signOff.submittedBy.designation || (auditType === "academic" ? "Director" : ""),
     submittedOn: signOff.submittedBy.date || new Date().toISOString(),
@@ -704,6 +882,11 @@ const normalizeSubmission = (submission = {}) => {
       submission.allAdministrativeContributorsSubmitted ??
       permissions.allContributorsSubmitted
     ),
+    allAuditorsSubmitted: booleanOrNull(
+      submission.allAuditorsSubmitted ??
+      submission.allAssignedAuditorsSubmitted ??
+      permissions.allAuditorsSubmitted
+    ) ?? (auditorProgress.total ? auditorProgress.allSubmitted : null),
     auditorReviewedBy: auditorSignOff.name || submission.auditorReviewedBy || submission.auditedBy || "",
     auditorReviewedByDesignation: auditorSignOff.designation || submission.auditorReviewedByDesignation || submission.auditorDesignation || "",
     auditorReviewedByRole: auditorSignOff.role || submission.auditorReviewedByRole || submission.auditorRole || "",
@@ -1261,6 +1444,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
     const auditorAdministrativePosts = forwardTarget.auditType === "administrative"
       ? uniqueValues(matchingAuditors.flatMap(administrativePostsFor))
       : [];
+    const auditorAssignments = buildAuditorAssignmentsForForwarding(forwardTarget, auditorType, matchingAuditors);
     const groupLabel = `${auditorNames.length} ${auditorType} ${forwardTarget.auditType} auditor${auditorNames.length === 1 ? "" : "s"}`;
 
     const payload = {
@@ -1268,6 +1452,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
       forwardedToAuditorIds: auditorIds,
       forwardedToAuditorNames: auditorNames,
       forwardedToAuditorEmails: auditorEmails,
+      auditorAssignments,
       forwardedAuditorType: auditorType,
       forwardedAuditCategory: forwardTarget.auditType,
       ...(forwardTarget.auditType === "administrative" ? {
@@ -1287,6 +1472,9 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
         forwardedToAuditorIds: auditorIds,
         forwardedToAuditorNames: auditorNames,
         forwardedToAuditorEmails: auditorEmails,
+        auditorAssignments,
+        auditorProgress: buildAuditorProgress(auditorAssignments),
+        allAuditorsSubmitted: false,
         forwardedAuditorType: auditorType,
         forwardedAuditCategory: forwardTarget.auditType,
         forwardedAt,
@@ -1299,15 +1487,17 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
   };
 
   const completeAuditorReview = async (submission, values, auditorAttachments = submission.attachments) => {
-    const ok = window.confirm(`Forward completed ${auditLabels[submission.auditType]} remarks to IQAC and VC?`);
+    const ok = window.confirm(`Submit your ${auditLabels[submission.auditType]} auditor review? The form will move to IQAC only after every assigned auditor submits.`);
     if (!ok) return;
 
-    setReviewingStatus("auditor-completed");
+    setReviewingStatus("auditor-submit");
     setError("");
 
     try {
       const auditorReviewedOn = new Date().toISOString();
       const signedValues = withAuditorSignOff(values, profile, auditorReviewedOn);
+      const assignedPosts = auditorPostsForCurrentSubmission(submission, profile);
+      const currentAssignments = auditorAssignmentsForCurrentUser(submission, profile);
       const { valuesData, tablesData, attachments } = buildSubmissionPayload({
           auditType: submission.auditType,
           values: signedValues,
@@ -1318,7 +1508,15 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
           ]),
         });
       const payload = {
-        status: backendStatusFor("auditor-completed"),
+        auditorId: Number(profile.id) || profile.id,
+        auditorName: profile.name,
+        auditorEmail: profile.email,
+        auditorType: profile.auditorType || auditorTypeFromRole(profile.role),
+        auditCategory: submission.auditType,
+        postsSubmitted: assignedPosts,
+        assignmentKeys: currentAssignments.map((assignment) => assignment.key).filter(Boolean),
+        submittedAt: auditorReviewedOn,
+        reviewStatus: "submitted",
         valuesData,
         tablesData,
         attachments,
@@ -1328,21 +1526,45 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
         auditorResubmittedAt: auditorReviewedOn,
       };
 
-      await updateSubmissionById(submission.id, payload);
+      const { data } = await submitAuditorReview(submission.id, payload);
+      const responseSubmission = data?.submission || submissionPayload(data);
+      const returnedAssignments = normalizeAuditorAssignments(responseSubmission, signedValues);
+      const fallbackAssignments = (submission.auditorAssignments || []).map((assignment) =>
+        currentAssignments.some((currentAssignment) => currentAssignment.key === assignment.key)
+          ? { ...assignment, status: "submitted", submittedAt: auditorReviewedOn }
+          : assignment
+      );
+      const auditorAssignments = returnedAssignments.length ? returnedAssignments : fallbackAssignments;
+      const auditorProgress = buildAuditorProgress(auditorAssignments);
+      const allAuditorsSubmitted = booleanOrNull(
+        responseSubmission.allAuditorsSubmitted ??
+        responseSubmission.allAssignedAuditorsSubmitted
+      ) ?? auditorProgress.allSubmitted;
+      const nextStatus = normalizeStatus(
+        responseSubmission.status ||
+        responseSubmission.submissionStatus ||
+        (allAuditorsSubmitted ? "auditor-completed" : "under-review")
+      );
+
       updateSubmission(submission.auditType, submission.id, {
-        status: "auditor-completed",
-        values: signedValues,
-        auditorReviewedBy: profile.name,
-        auditorReviewedByDesignation: profile.designation,
-        auditorReviewedByRole: role,
-        auditorReviewedOn,
+        status: nextStatus,
+        values: responseSubmission.values ? parseSubmissionFormData(responseSubmission).values : signedValues,
+        auditorAssignments,
+        auditorProgress,
+        allAuditorsSubmitted,
+        ...(allAuditorsSubmitted ? {
+          auditorReviewedBy: profile.name,
+          auditorReviewedByDesignation: profile.designation,
+          auditorReviewedByRole: role,
+          auditorReviewedOn,
+        } : {}),
         auditorCorrectionRequested: false,
         correctionRequestedForAuditor: false,
         requiresAuditorResubmission: false,
         auditorCorrectionMessage: "",
       });
     } catch (reviewError) {
-      setError(getApiErrorMessage(reviewError, "Could not forward completed auditor remarks."));
+      setError(getApiErrorMessage(reviewError, "Could not submit your auditor review."));
     } finally {
       setReviewingStatus("");
     }
@@ -1411,8 +1633,17 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
                   String(selectedSubmission.auditorReviewedByRole || "").includes("internal")
                 )
               }
-              canEditAuditorSection={isAuditor && matchesAuditorSession(selectedSubmission, profile) && !isAuditorCompleted(selectedSubmission)}
-              auditorReviewReadOnly={isAuditor && isAuditorCompleted(selectedSubmission)}
+              canEditAuditorSection={
+                isAuditor &&
+                matchesAuditorSession(selectedSubmission, profile) &&
+                !isAuditorCompleted(selectedSubmission) &&
+                (!currentAuditorSubmitted(selectedSubmission, profile) || isAuditorCorrectionRequested(selectedSubmission))
+              }
+              auditorReviewReadOnly={
+                isAuditor &&
+                (isAuditorCompleted(selectedSubmission) || currentAuditorSubmitted(selectedSubmission, profile)) &&
+                !isAuditorCorrectionRequested(selectedSubmission)
+              }
               auditorCorrectionMode={isAuditor && isAuditorCorrectionRequested(selectedSubmission)}
               showPreviousAuditorReference={isAuditor && profile.auditorType === "external"}
             />
@@ -1995,6 +2226,8 @@ function SubmissionCard({
         </div>
       )}
 
+      <AuditorProgressPanel submission={submission} compact />
+
       <div style={styles.cardActions}>
         {onForward && canForwardSubmissionToAuditor(submission) && !isAuditorCompleted(submission) && !hasAuditorAssignment(submission) && (
           <button type="button" className="btn btn-secondary" onClick={onForward}>
@@ -2068,23 +2301,50 @@ function FullFormReview({
     !auditorReviewReadOnly &&
     hasAcademicPartEValues(previousInternalReport?.values) &&
     academicPartEValuesMatch(submission.values, previousInternalReport.values);
+  const currentUserAssignments = auditorAssignmentsForCurrentUser(submission);
+  const currentAssignmentValues = currentUserAssignments
+    .map((assignment) => safeObjectValue(assignment.values))
+    .find(hasAcademicPartEValues);
+  const currentAssignmentAttachments = uniqueAttachments(
+    currentUserAssignments.flatMap((assignment) => [
+      ...arrayValue(assignment.attachments).filter(isAttachmentValue),
+      ...valueList(safeObjectValue(assignment.values).auditDocumentation).filter(isAttachmentValue),
+    ])
+  );
+  const shouldClearFreshAuditorDraft =
+    canEditAuditorSection &&
+    !auditorCorrectionMode &&
+    !currentAssignmentValues &&
+    !shouldClearCopiedExternalPartE;
+  const initialDraftValues = currentAssignmentValues
+    ? { ...(submission.values || {}), ...currentAssignmentValues }
+    : shouldClearCopiedExternalPartE || shouldClearFreshAuditorDraft
+      ? clearAcademicPartEValues(submission.values)
+      : submission.values || {};
+  const initialDraftAttachments = currentAssignmentValues
+    ? currentAssignmentAttachments
+    : shouldClearCopiedExternalPartE
+      ? removeMatchingPartEAttachments(submission.attachments || [], previousInternalReport.values)
+      : shouldClearFreshAuditorDraft
+        ? []
+        : submission.attachments || [];
   const [draftValues, setDraftValues] = useState(
-    shouldClearCopiedExternalPartE ? clearAcademicPartEValues(submission.values) : submission.values || {}
+    initialDraftValues
   );
   const [draftAttachments, setDraftAttachments] = useState(
-    shouldClearCopiedExternalPartE
-      ? removeMatchingPartEAttachments(submission.attachments || [], previousInternalReport.values)
-      : submission.attachments || []
+    initialDraftAttachments
   );
-  const submittedForm = {
-    values: draftValues,
-    tables: submission.tables || {},
-    hasSavedData: submission.hasSavedData,
-  };
   const [activeSectionIndex, setActiveSectionIndex] = useState(0);
   const [reportMode, setReportMode] = useState(false);
   const activeSection = sections[activeSectionIndex] || sections[0];
   const activeSectionIsAuditorOwned = activeSection ? isAuditorSection(activeSection, submission.auditType) : false;
+  const canShowAuditorReviewValues = canEditAuditorSection || auditorReviewReadOnly || isAuditorCompleted(submission);
+  const shouldHidePendingAuditorValues = activeSectionIsAuditorOwned && !canShowAuditorReviewValues;
+  const submittedForm = {
+    values: shouldHidePendingAuditorValues ? hidePendingAuditorReviewValues(draftValues) : draftValues,
+    tables: submission.tables || {},
+    hasSavedData: submission.hasSavedData,
+  };
   const isLastSection = activeSectionIndex === sections.length - 1;
   const hasRemarks = Boolean(submission.remarks.trim());
   const goToSection = (sectionIndex) => {
@@ -2198,6 +2458,8 @@ function FullFormReview({
         <StatusBadge status={submission.status} />
       </div>
 
+      <AuditorProgressPanel submission={submission} />
+
       <SectionReviewNav
         sections={sections}
         activeIndex={activeSectionIndex}
@@ -2214,6 +2476,12 @@ function FullFormReview({
         <div style={styles.correctionNotice}>
           <strong>Correction requested by IQAC.</strong>
           <span>{submission.auditorCorrectionMessage || "Rectify the auditor review and submit it again."}</span>
+        </div>
+      )}
+
+      {shouldHidePendingAuditorValues && (
+        <div style={styles.readOnlyReviewNotice}>
+          Auditor Part {auditorSectionNumberFor(submission.auditType)} is pending. Observations, recommendations and uploaded documentation will appear here after the assigned auditor submits.
         </div>
       )}
 
@@ -2256,10 +2524,10 @@ function FullFormReview({
         ) : canEditAuditorSection && activeSectionIsAuditorOwned ? (
           <div style={styles.finalReviewPanel}>
             <div style={styles.finalActionRow}>
-              <span style={styles.reviewHint}>Complete the auditor observations and recommendations, then forward the form to IQAC and VC.</span>
-              <button type="button" className="btn btn-primary" onClick={() => onCompleteAuditorReview(draftValues, draftAttachments)} disabled={Boolean(reviewingStatus)} aria-busy={reviewingStatus === "auditor-completed"}>
-                {reviewingStatus === "auditor-completed" && <InlineSpinner label="Forwarding review" />}
-                {reviewingStatus === "auditor-completed" ? "Forwarding..." : "Forward to IQAC & VC"}
+              <span style={styles.reviewHint}>Complete your assigned auditor observations and submit them for this assignment.</span>
+              <button type="button" className="btn btn-primary" onClick={() => onCompleteAuditorReview(draftValues, draftAttachments)} disabled={Boolean(reviewingStatus)} aria-busy={reviewingStatus === "auditor-submit"}>
+                {reviewingStatus === "auditor-submit" && <InlineSpinner label="Submitting auditor review" />}
+                {reviewingStatus === "auditor-submit" ? "Submitting..." : "Submit My Auditor Review"}
               </button>
             </div>
           </div>
@@ -2823,6 +3091,77 @@ function InfoPill({ label, value }) {
   );
 }
 
+function auditorAssignmentLabel(value = "") {
+  const option = ADMINISTRATIVE_POSTS.find((post) => post.value === value || normalizeAuditAssignment(post.label) === normalizeAuditAssignment(value));
+  return option?.label || titleCase(value || "Assigned review");
+}
+
+function AuditorProgressPanel({ submission, compact = false }) {
+  const progress = submission.auditorProgress || {};
+  if (!progress.total) return null;
+
+  const percentage = Math.round((progress.submitted / progress.total) * 100);
+  const pendingLabel = progress.pending
+    ? `${progress.pending} pending`
+    : "All submitted";
+
+  return (
+    <div style={compact ? styles.auditorProgressCompact : styles.auditorProgressPanel}>
+      <div style={styles.auditorProgressHeader}>
+        <div>
+          <strong style={styles.auditorProgressTitle}>Auditor progress</strong>
+          <span style={styles.auditorProgressSubtext}>{progress.submitted} / {progress.total} reviews submitted</span>
+        </div>
+        <span style={progress.pending ? styles.auditorProgressPending : styles.auditorProgressDone}>{pendingLabel}</span>
+      </div>
+      <div style={styles.auditorProgressTrack}>
+        <span style={{ ...styles.auditorProgressBar, width: `${percentage}%` }} />
+      </div>
+      {!compact && (
+        <div style={styles.auditorPostGrid}>
+          {(progress.byPost || []).map((postProgress) => (
+            <div key={postProgress.post} style={styles.auditorPostStatus}>
+              <strong>{auditorAssignmentLabel(postProgress.post)}</strong>
+              <span>{postProgress.submitted} / {postProgress.total} submitted</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {!compact && Boolean(submission.auditorAssignments?.length) && (
+        <div style={styles.auditorAssignmentList}>
+          {submission.auditorAssignments.map((assignment) => {
+            const reviewValues = safeObjectValue(assignment.values);
+            const documents = uniqueAttachments([
+              ...arrayValue(assignment.attachments).filter(isAttachmentValue),
+              ...valueList(reviewValues.auditDocumentation).filter(isAttachmentValue),
+            ]);
+            return (
+              <div key={assignment.key} className="review-auditor-assignment-row" style={styles.auditorAssignmentRow}>
+                <div style={styles.auditorAssignmentMain}>
+                  <strong>{assignment.auditorName}</strong>
+                  <span>
+                    {titleCase(assignment.auditorType || submission.forwardedAuditorType || "auditor")} - {auditorAssignmentLabel(assignment.post || assignment.school)}
+                  </span>
+                </div>
+                <span style={auditorAssignmentSubmitted(assignment) ? styles.auditorProgressDone : styles.auditorProgressPending}>
+                  {auditorAssignmentSubmitted(assignment) ? "Submitted" : "Pending"}
+                </span>
+                <div style={styles.auditorAssignmentDocs}>
+                  {documents.length ? documents.map((file) => (
+                    <a key={attachmentKeyFor(file)} href={getAttachmentUrl(file.url)} target="_blank" rel="noreferrer">
+                      {file.name || file.fileName || "Documentation"}
+                    </a>
+                  )) : <span>No documentation uploaded</span>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StatusBadge({ status }) {
   const tone = statusStyles[status] || statusStyles.submitted;
   return (
@@ -3209,6 +3548,11 @@ function PrintStyles() {
       @media (max-width: 900px) {
         .review-dashboard-shell { flex-direction: column; }
         .review-dashboard-main { padding: 18px !important; }
+      }
+      @media (max-width: 700px) {
+        .review-auditor-assignment-row {
+          grid-template-columns: 1fr !important;
+        }
       }
       @media print {
         .app-sidebar,
@@ -3695,6 +4039,124 @@ const styles = {
     color: "#075985",
     background: "#f0f9ff",
     fontSize: 11.5,
+  },
+  auditorProgressPanel: {
+    display: "grid",
+    gap: 10,
+    border: "1px solid #c7d2fe",
+    borderRadius: 8,
+    background: "#eef2ff",
+    padding: "12px 14px",
+  },
+  auditorProgressCompact: {
+    display: "grid",
+    gap: 8,
+    border: "1px solid #c7d2fe",
+    borderRadius: 8,
+    background: "#eef2ff",
+    padding: "10px 12px",
+  },
+  auditorProgressHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  auditorProgressTitle: {
+    display: "block",
+    color: "#3730a3",
+    fontSize: 12,
+    fontWeight: 850,
+  },
+  auditorProgressSubtext: {
+    display: "block",
+    marginTop: 2,
+    color: "#4f46e5",
+    fontSize: 11,
+    fontWeight: 700,
+  },
+  auditorProgressPending: {
+    flexShrink: 0,
+    border: "1px solid #fbbf24",
+    borderRadius: 999,
+    background: "#fffbeb",
+    color: "#92400e",
+    padding: "5px 8px",
+    fontSize: 10.5,
+    fontWeight: 850,
+  },
+  auditorProgressDone: {
+    flexShrink: 0,
+    border: "1px solid #86efac",
+    borderRadius: 999,
+    background: "#f0fdf4",
+    color: "#166534",
+    padding: "5px 8px",
+    fontSize: 10.5,
+    fontWeight: 850,
+  },
+  auditorProgressTrack: {
+    height: 7,
+    overflow: "hidden",
+    borderRadius: 999,
+    background: "#c7d2fe",
+  },
+  auditorProgressBar: {
+    display: "block",
+    height: "100%",
+    borderRadius: 999,
+    background: "#4f46e5",
+  },
+  auditorPostGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+    gap: 8,
+  },
+  auditorPostStatus: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    border: "1px solid rgba(79, 70, 229, .18)",
+    borderRadius: 8,
+    background: "rgba(255, 255, 255, .72)",
+    padding: "8px 10px",
+    color: "#312e81",
+    fontSize: 11,
+    fontWeight: 750,
+  },
+  auditorAssignmentList: {
+    display: "grid",
+    gap: 8,
+  },
+  auditorAssignmentRow: {
+    display: "grid",
+    gridTemplateColumns: "minmax(180px, 1fr) auto minmax(180px, .9fr)",
+    alignItems: "center",
+    gap: 10,
+    border: "1px solid rgba(79, 70, 229, .16)",
+    borderRadius: 8,
+    background: "rgba(255, 255, 255, .82)",
+    padding: "9px 10px",
+  },
+  auditorAssignmentMain: {
+    minWidth: 0,
+    display: "flex",
+    flexDirection: "column",
+    gap: 2,
+    color: "#312e81",
+    fontSize: 11.5,
+    fontWeight: 750,
+  },
+  auditorAssignmentDocs: {
+    minWidth: 0,
+    display: "flex",
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
+    gap: 7,
+    color: "#64748b",
+    fontSize: 11,
+    fontWeight: 700,
   },
   remarksLabel: {
     display: "flex",
