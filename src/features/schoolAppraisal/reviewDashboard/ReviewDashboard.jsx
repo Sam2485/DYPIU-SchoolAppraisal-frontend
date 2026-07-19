@@ -196,6 +196,65 @@ const attachmentsFromValues = (values = {}) =>
     if (Array.isArray(value)) return value.filter(isAttachmentValue);
     return isAttachmentValue(value) ? [value] : [];
   });
+const extensionForFileName = (name = "") =>
+  String(name).split("?")[0].split("#")[0].split(".").pop()?.toLowerCase() || "";
+const attachmentFileName = (attachment = {}) =>
+  attachment.name || attachment.fileName || attachment.filename || attachment.url || attachment.publicUrl || attachment.downloadUrl || "";
+const isBrowserPreviewableAttachment = (attachment = {}) => {
+  const contentType = String(attachment.contentType || attachment.mimeType || attachment.type || "").toLowerCase();
+  const extension = extensionForFileName(attachmentFileName(attachment));
+  return (
+    contentType.includes("pdf") ||
+    contentType.startsWith("image/") ||
+    contentType.startsWith("text/") ||
+    ["pdf", "png", "jpg", "jpeg", "gif", "webp", "svg", "txt", "csv"].includes(extension)
+  );
+};
+const documentTypeLabel = (attachment = {}) => {
+  const extension = extensionForFileName(attachmentFileName(attachment));
+  const labels = {
+    pdf: "PDF document",
+    xls: "Excel workbook",
+    xlsx: "Excel workbook",
+    csv: "CSV file",
+    doc: "Word document",
+    docx: "Word document",
+    zip: "ZIP archive",
+  };
+  return labels[extension] || "Document";
+};
+const directDownloadUrl = (url, name) => {
+  const resolvedUrl = getAttachmentUrl(url);
+  try {
+    const downloadUrl = new URL(resolvedUrl);
+    if (downloadUrl.hostname.includes("storage.googleapis.com") && !downloadUrl.searchParams.has("X-Goog-Signature")) {
+      downloadUrl.searchParams.set("response-content-disposition", `attachment; filename="${name}"`);
+      downloadUrl.searchParams.set("response-content-type", "application/octet-stream");
+      return downloadUrl.toString();
+    }
+  } catch {
+    return resolvedUrl;
+  }
+  return resolvedUrl;
+};
+const downloadAttachmentFile = async (url, name) => {
+  const resolvedUrl = getAttachmentUrl(url);
+  try {
+    const response = await fetch(resolvedUrl);
+    if (!response.ok) throw new Error("Download failed");
+    const blob = await response.blob();
+    const objectUrl = window.URL.createObjectURL(blob);
+    const downloadLink = document.createElement("a");
+    downloadLink.href = objectUrl;
+    downloadLink.download = name;
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+    downloadLink.remove();
+    window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 1000);
+  } catch {
+    window.open(directDownloadUrl(url, name), "_blank", "noopener,noreferrer");
+  }
+};
 
 const blocksFor = (section) =>
   section.blocks || [
@@ -274,9 +333,19 @@ const getSubmissionAuditorSignOff = (submission = {}) => {
   };
 };
 const isApprovedReport = (submission = {}) => submission.status === "approved";
+const isAuditorCorrectionRequested = (submission = {}) =>
+  Boolean(
+    submission.auditorCorrectionRequested ||
+    submission.correctionRequestedForAuditor ||
+    submission.requiresAuditorResubmission
+  );
 const isAuditorCompleted = (submission = {}) =>
-  ["auditor-completed", "approved"].includes(submission.status) ||
-  Boolean(submission.auditorReviewedOn || submission.auditorReviewedBy || getAuditorSignOff(submission.values).date);
+  !["submitted", "under-review"].includes(submission.status) &&
+  !isAuditorCorrectionRequested(submission) &&
+  (
+    ["auditor-completed", "approved"].includes(submission.status) ||
+    Boolean(submission.auditorReviewedOn || submission.auditorReviewedBy || getAuditorSignOff(submission.values).date)
+  );
 const responseList = (payload) => {
   const data = payload?.data ?? payload;
   if (Array.isArray(data)) return data;
@@ -619,6 +688,14 @@ const normalizeSubmission = (submission = {}) => {
     forwardedAuditorType: normalizeUserRole(submission.forwardedAuditorType || submission.auditorType || ""),
     forwardedAuditCategory: normalizeUserRole(submission.forwardedAuditCategory || submission.auditCategory || ""),
     forwardedAt: submission.forwardedAt || "",
+    auditorCorrectionRequested: Boolean(
+      submission.auditorCorrectionRequested ||
+      submission.correctionRequestedForAuditor ||
+      submission.requiresAuditorResubmission
+    ),
+    auditorCorrectionMessage: submission.auditorCorrectionMessage || submission.correctionRemarks || "",
+    auditorCorrectionRequestedOn: submission.auditorCorrectionRequestedOn || submission.correctionRequestedOn || "",
+    auditorCorrectionRequestedBy: submission.auditorCorrectionRequestedBy || submission.correctionRequestedBy || "",
     overallStatus,
     contributionStatus: normalizeStatus(submission.contributionStatus || submission.myContributionStatus || submission.userContributionStatus || ""),
     canForwardToAuditor: booleanOrNull(submission.canForwardToAuditor ?? permissions.canForwardToAuditor),
@@ -688,6 +765,8 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
   const [forwardingId, setForwardingId] = useState("");
   const [approvalTarget, setApprovalTarget] = useState(null);
   const [approvalCategory, setApprovalCategory] = useState("");
+  const [correctionTarget, setCorrectionTarget] = useState(null);
+  const [correctionMessage, setCorrectionMessage] = useState("");
   const [startingNextCycleId, setStartingNextCycleId] = useState("");
   const [downloadingAttachmentsId, setDownloadingAttachmentsId] = useState("");
   const [academicYear, setAcademicYear] = useState(
@@ -950,6 +1029,99 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
     );
   };
 
+  const openCorrectionModal = (submission) => {
+    if (!submission?.id) return;
+    setCorrectionTarget(submission);
+    setCorrectionMessage(
+      submission.auditorCorrectionMessage ||
+      submission.remarks ||
+      "Please rectify the auditor observations/recommendations and submit the review again."
+    );
+  };
+
+  const closeCorrectionModal = () => {
+    if (reviewingStatus === "auditor-correction") return;
+    setCorrectionTarget(null);
+    setCorrectionMessage("");
+  };
+
+  const returnToAuditorForCorrection = async () => {
+    const submission = correctionTarget;
+    if (!submission?.id) return;
+
+    const trimmedMessage = correctionMessage.trim() ||
+      "Please rectify the auditor observations/recommendations and submit the review again.";
+
+    setReviewingStatus("auditor-correction");
+    setError("");
+
+    try {
+      const requestedOn = new Date().toISOString();
+      const forwardedToAuditorIds = valueList(
+        submission.forwardedToAuditorIds?.length
+          ? submission.forwardedToAuditorIds
+          : submission.forwardedToAuditorId
+      )
+        .map((id) => Number(id))
+        .filter((id) => Number.isSafeInteger(id) && id > 0);
+      const forwardedToAuditorNames = valueList(
+        submission.forwardedToAuditorNames?.length
+          ? submission.forwardedToAuditorNames
+          : submission.forwardedToAuditorName
+      );
+      const forwardedToAuditorEmails = valueList(
+        submission.forwardedToAuditorEmails?.length
+          ? submission.forwardedToAuditorEmails
+          : submission.forwardedToAuditorEmail
+      );
+      const payload = {
+        status: backendStatusFor("under-review"),
+        remarks: trimmedMessage,
+        forwardedToAuditorId: forwardedToAuditorIds[0] || submission.forwardedToAuditorId || "",
+        forwardedToAuditorName: forwardedToAuditorNames[0] || submission.forwardedToAuditorName || "",
+        forwardedToAuditorEmail: forwardedToAuditorEmails[0] || submission.forwardedToAuditorEmail || "",
+        forwardedToAuditorIds,
+        forwardedToAuditorNames,
+        forwardedToAuditorEmails,
+        forwardedAuditorType: submission.forwardedAuditorType || "internal",
+        forwardedAuditCategory: submission.forwardedAuditCategory || submission.auditType,
+        auditorCorrectionRequested: true,
+        correctionRequestedForAuditor: true,
+        requiresAuditorResubmission: true,
+        auditorCorrectionMessage: trimmedMessage,
+        auditorCorrectionRequestedBy: profile.name,
+        auditorCorrectionRequestedByRole: role,
+        auditorCorrectionRequestedOn: requestedOn,
+      };
+
+      await updateSubmissionById(submission.id, payload);
+      updateSubmission(submission.auditType, submission.id, {
+        status: "under-review",
+        remarks: trimmedMessage,
+        forwardedToAuditorId: forwardedToAuditorIds[0] || submission.forwardedToAuditorId || "",
+        forwardedToAuditorName: forwardedToAuditorNames[0] || submission.forwardedToAuditorName || "",
+        forwardedToAuditorEmail: forwardedToAuditorEmails[0] || submission.forwardedToAuditorEmail || "",
+        forwardedToAuditorIds,
+        forwardedToAuditorNames,
+        forwardedToAuditorEmails,
+        forwardedAuditorType: submission.forwardedAuditorType || "internal",
+        forwardedAuditCategory: submission.forwardedAuditCategory || submission.auditType,
+        auditorCorrectionRequested: true,
+        correctionRequestedForAuditor: true,
+        requiresAuditorResubmission: true,
+        auditorCorrectionMessage: trimmedMessage,
+        auditorCorrectionRequestedBy: profile.name,
+        auditorCorrectionRequestedOn: requestedOn,
+      });
+      setCorrectionTarget(null);
+      setCorrectionMessage("");
+    } catch (correctionError) {
+      setError(getApiErrorMessage(correctionError, "Could not return this review to the auditor for correction."));
+    } finally {
+      setReviewingStatus("");
+    }
+  };
+
   const startNextAuditCycle = async (submission) => {
     if (submission.reportCategory !== "internal" || Number(submission.version) !== 1 || submission.hasNextCycle) {
       setError("Only an Internal Audit Version 1 report without an existing successor can start the next cycle.");
@@ -1150,6 +1322,10 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
         valuesData,
         tablesData,
         attachments,
+        auditorCorrectionRequested: false,
+        correctionRequestedForAuditor: false,
+        requiresAuditorResubmission: false,
+        auditorResubmittedAt: auditorReviewedOn,
       };
 
       await updateSubmissionById(submission.id, payload);
@@ -1160,6 +1336,10 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
         auditorReviewedByDesignation: profile.designation,
         auditorReviewedByRole: role,
         auditorReviewedOn,
+        auditorCorrectionRequested: false,
+        correctionRequestedForAuditor: false,
+        requiresAuditorResubmission: false,
+        auditorCorrectionMessage: "",
       });
     } catch (reviewError) {
       setError(getApiErrorMessage(reviewError, "Could not forward completed auditor remarks."));
@@ -1218,11 +1398,22 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
               onBack={() => setSelectedSubmission(null)}
               onRemarksChange={(remarks) => updateSubmission(selectedSubmission.auditType, selectedSubmission.id, { remarks })}
               onApprove={() => openApprovalModal(selectedSubmission)}
-              onCompleteAuditorReview={(values) => completeAuditorReview(selectedSubmission, values)}
+              onReturnToAuditor={() => openCorrectionModal(selectedSubmission)}
+              onCompleteAuditorReview={(values, attachments) => completeAuditorReview(selectedSubmission, values, attachments)}
               reviewingStatus={reviewingStatus}
               canApprove={!isAuditor && isAuditorCompleted(selectedSubmission)}
+              canReturnToAuditor={
+                !isAuditor &&
+                isAuditorCompleted(selectedSubmission) &&
+                !isApprovedReport(selectedSubmission) &&
+                (
+                  selectedSubmission.forwardedAuditorType === "internal" ||
+                  String(selectedSubmission.auditorReviewedByRole || "").includes("internal")
+                )
+              }
               canEditAuditorSection={isAuditor && matchesAuditorSession(selectedSubmission, profile) && !isAuditorCompleted(selectedSubmission)}
               auditorReviewReadOnly={isAuditor && isAuditorCompleted(selectedSubmission)}
+              auditorCorrectionMode={isAuditor && isAuditorCorrectionRequested(selectedSubmission)}
               showPreviousAuditorReference={isAuditor && profile.auditorType === "external"}
             />
           ) : visibleActiveView === "overview" ? (
@@ -1318,6 +1509,16 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
               setApprovalTarget(null);
               setApprovalCategory("");
             }}
+          />
+        )}
+        {correctionTarget && (
+          <ReturnToAuditorModal
+            submission={correctionTarget}
+            message={correctionMessage}
+            onMessageChange={setCorrectionMessage}
+            returning={reviewingStatus === "auditor-correction"}
+            onReturn={returnToAuditorForCorrection}
+            onCancel={closeCorrectionModal}
           />
         )}
         {showNextYearModal && (
@@ -1833,11 +2034,14 @@ function FullFormReview({
   onBack,
   onRemarksChange,
   onApprove,
+  onReturnToAuditor,
   onCompleteAuditorReview,
   reviewingStatus,
   canApprove,
+  canReturnToAuditor,
   canEditAuditorSection,
   auditorReviewReadOnly,
+  auditorCorrectionMode,
   showPreviousAuditorReference,
 }) {
   const sections = sectionsForAudit(submission.auditType);
@@ -1928,6 +2132,14 @@ function FullFormReview({
       ? previousInternalReport
       : null;
 
+  useEffect(() => {
+    if (!auditorCorrectionMode) return;
+    const alertKey = `auditor-correction-${submission.id}-${submission.auditorCorrectionRequestedOn || ""}`;
+    if (sessionStorage.getItem(alertKey)) return;
+    window.alert("You should submit again after rectifying the mistake in your auditor review.");
+    sessionStorage.setItem(alertKey, "shown");
+  }, [auditorCorrectionMode, submission.auditorCorrectionRequestedOn, submission.id]);
+
   if (reportMode) {
     return (
       <section style={styles.fullReviewPage}>
@@ -1995,6 +2207,13 @@ function FullFormReview({
       {auditorReviewReadOnly && (
         <div style={styles.readOnlyReviewNotice}>
           This auditor review has been submitted and is now read-only.
+        </div>
+      )}
+
+      {auditorCorrectionMode && (
+        <div style={styles.correctionNotice}>
+          <strong>Correction requested by IQAC.</strong>
+          <span>{submission.auditorCorrectionMessage || "Rectify the auditor review and submit it again."}</span>
         </div>
       )}
 
@@ -2088,6 +2307,22 @@ function FullFormReview({
                       : "Auditor remarks are required before final review actions are available."}
                   </span>
                   <div style={styles.cardActions}>
+                    {canReturnToAuditor && (
+                      <button
+                        type="button"
+                        style={{
+                          ...styles.returnToggleButton,
+                          ...(reviewingStatus === "auditor-correction" ? styles.activeReturnToggleButton : {}),
+                        }}
+                        onClick={onReturnToAuditor}
+                        disabled={Boolean(reviewingStatus)}
+                        aria-pressed={reviewingStatus === "auditor-correction"}
+                        aria-busy={reviewingStatus === "auditor-correction"}
+                      >
+                        {reviewingStatus === "auditor-correction" && <InlineSpinner label="Returning to auditor" />}
+                        {reviewingStatus === "auditor-correction" ? "Returning..." : "Return to Auditor"}
+                      </button>
+                    )}
                     <button type="button" className="btn btn-primary" onClick={onApprove} disabled={!canApprove || !hasRemarks || Boolean(reviewingStatus)} aria-busy={reviewingStatus === "approved"}>
                       {reviewingStatus === "approved" && <InlineSpinner label="Approving form" />}
                       {reviewingStatus === "approved" ? "Approving..." : "Approve"}
@@ -2508,6 +2743,7 @@ function renderValue(value) {
   if (isAttachmentValue(value)) {
     const name = value.name || value.fileName || value.filename || "Attachment";
     const url = value.url || value.publicUrl || value.downloadUrl;
+    const canPreview = isBrowserPreviewableAttachment(value);
     return (
       <div style={styles.attachmentPreview}>
         <span style={styles.attachmentDocumentIcon} aria-hidden="true">
@@ -2518,12 +2754,27 @@ function renderValue(value) {
         </span>
         <span style={styles.attachmentDocumentDetails}>
           <strong style={styles.attachmentDocumentName} title={name}>{name}</strong>
-          <small style={styles.mutedText}>Document</small>
+          <small style={styles.mutedText}>{documentTypeLabel(value)}</small>
         </span>
-        {url ? (
-          <a href={getAttachmentUrl(url)} target="_blank" rel="noreferrer" style={styles.attachmentLink} title="Open document">
+        {url && canPreview ? (
+          <a
+            href={getAttachmentUrl(url)}
+            target="_blank"
+            rel="noreferrer"
+            style={styles.attachmentLink}
+            title="Open document"
+          >
             Open
           </a>
+        ) : url ? (
+          <button
+            type="button"
+            style={styles.attachmentLink}
+            title="Download document"
+            onClick={() => downloadAttachmentFile(url, name)}
+          >
+            Download
+          </button>
         ) : (
           <span style={styles.mutedText}>Link unavailable</span>
         )}
@@ -2679,6 +2930,65 @@ function ApprovalCategoryModal({ submission, selectedCategory, onCategoryChange,
           <button type="button" className="btn btn-primary" onClick={onApprove} disabled={!selectedCategory || approving} aria-busy={approving}>
             {approving && <InlineSpinner label="Approving and archiving report" />}
             {approving ? "Approving..." : "Approve & Archive"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ReturnToAuditorModal({ submission, message, onMessageChange, returning, onReturn, onCancel }) {
+  const hasMessage = Boolean(message.trim());
+
+  return (
+    <div style={styles.modalBackdrop} onClick={returning ? undefined : onCancel}>
+      <div style={styles.forwardModal} onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="return-auditor-title">
+        <div style={styles.forwardModalHeader}>
+          <div style={styles.forwardHeaderMain}>
+            <span style={styles.forwardHeaderIcon}>RA</span>
+            <div>
+              <p style={styles.kicker}>Auditor correction</p>
+              <h3 id="return-auditor-title" style={styles.forwardModalTitle}>Return to Auditor</h3>
+              <p style={styles.forwardModalMeta}>{submission.school} &middot; {auditLabels[submission.auditType]}</p>
+            </div>
+          </div>
+          <button type="button" style={styles.iconCloseButton} onClick={onCancel} aria-label="Close return to auditor dialog" disabled={returning}>
+            x
+          </button>
+        </div>
+
+        <div style={styles.forwardStep}>
+          <div style={styles.forwardStepHeading}>
+            <span style={styles.forwardStepBadge}>1</span>
+            <div>
+              <h4 style={styles.forwardStepTitle}>Correction instructions</h4>
+              <p style={styles.forwardStepHint}>This sends the review back only to the same internal auditor for rectification.</p>
+            </div>
+          </div>
+          <label style={styles.remarksLabel}>
+            Message for auditor
+            <textarea
+              className="audit-control"
+              value={message}
+              onChange={(event) => onMessageChange(event.target.value)}
+              placeholder="Write what the auditor must rectify before resubmitting."
+              style={{ ...styles.remarksInput, minHeight: 130 }}
+              disabled={returning}
+            />
+          </label>
+        </div>
+
+        <div style={styles.returnModalNotice}>
+          The Director or Administrative submitter will not be asked to resubmit. The auditor must submit again after correcting the review.
+        </div>
+
+        <div style={styles.forwardFooter}>
+          <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={returning}>
+            Cancel
+          </button>
+          <button type="button" style={styles.returnToggleButton} onClick={onReturn} disabled={!hasMessage || returning} aria-busy={returning}>
+            {returning && <InlineSpinner label="Returning to auditor" />}
+            {returning ? "Returning..." : "Return to Auditor"}
           </button>
         </div>
       </div>
@@ -3483,6 +3793,39 @@ const styles = {
     fontWeight: 700,
     lineHeight: 1.5,
   },
+  correctionNotice: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+    border: "1px solid #fbbf24",
+    borderRadius: 8,
+    background: "#fffbeb",
+    color: "#92400e",
+    padding: "11px 14px",
+    fontSize: 13,
+    fontWeight: 700,
+    lineHeight: 1.5,
+  },
+  returnToggleButton: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    minHeight: 42,
+    border: "1px solid #f59e0b",
+    borderRadius: 999,
+    padding: "10px 15px",
+    color: "#92400e",
+    background: "#fffbeb",
+    cursor: "pointer",
+    fontFamily: "inherit",
+    fontSize: 13,
+    fontWeight: 850,
+  },
+  activeReturnToggleButton: {
+    color: "#fff",
+    background: "#f59e0b",
+  },
   historyReference: {
     border: "1px solid #c7d2fe",
     borderRadius: 8,
@@ -4259,6 +4602,17 @@ const styles = {
     fontWeight: 650,
     lineHeight: 1.5,
   },
+  returnModalNotice: {
+    margin: "18px 28px 0",
+    border: "1px solid #fbbf24",
+    borderRadius: 8,
+    background: "#fffbeb",
+    color: "#92400e",
+    padding: "11px 14px",
+    fontSize: 13,
+    fontWeight: 700,
+    lineHeight: 1.5,
+  },
   attachmentDocumentIcon: {
     width: 34,
     height: 34,
@@ -4293,6 +4647,8 @@ const styles = {
     padding: "5px 8px",
     fontSize: 12,
     fontWeight: 700,
+    fontFamily: "inherit",
+    cursor: "pointer",
     textDecoration: "none",
   },
   mutedText: {
