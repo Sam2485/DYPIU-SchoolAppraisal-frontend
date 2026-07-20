@@ -45,6 +45,87 @@ const safeObjectValue = (value) => {
   }
   return {};
 };
+const valueList = (value) => {
+  if (Array.isArray(value)) return value.filter(Boolean);
+  if (value == null || value === "") return [];
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed.filter(Boolean);
+    } catch {
+      return value.split(",").map((item) => item.trim()).filter(Boolean);
+    }
+  }
+  return [value].filter(Boolean);
+};
+const normalizeAssignmentText = (value = "") => String(value).trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+const uniqueValues = (values) => [...new Set(values.filter(Boolean))];
+const fieldValueKey = (value) => {
+  if (isAttachmentValue(value)) return value.url || value.publicUrl || value.downloadUrl || value.fileName || value.name;
+  return typeof value === "object" ? JSON.stringify(value) : String(value);
+};
+const isEmptyReviewValue = (value) => {
+  if (Array.isArray(value)) return value.length === 0;
+  if (isAttachmentValue(value)) return false;
+  if (value && typeof value === "object") return Object.keys(value).length === 0;
+  return String(value || "").trim() === "";
+};
+const mergeReviewValues = (base = {}, next = {}) => {
+  const merged = { ...base };
+  Object.entries(next).forEach(([fieldId, value]) => {
+    if (Array.isArray(merged[fieldId]) || Array.isArray(value)) {
+      const seen = new Set();
+      merged[fieldId] = [...valueList(merged[fieldId]), ...valueList(value)].filter((item) => {
+        const key = fieldValueKey(item);
+        if (!key || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      return;
+    }
+    if (isEmptyReviewValue(merged[fieldId]) && !isEmptyReviewValue(value)) {
+      merged[fieldId] = value;
+    }
+  });
+  return merged;
+};
+const auditorDisplayKeyFor = (assignment = {}, index = 0) => {
+  const type = normalizeAssignmentText(assignment.auditorType || assignment.type || "");
+  const id = String(assignment.auditorId || assignment.userId || "").trim();
+  if (id) return `id:${type}:${id}`;
+  const email = normalizeAssignmentText(assignment.auditorEmail || assignment.email || assignment.username || "");
+  if (email) return `email:${type}:${email}`;
+  return `assignment:${assignment.key || index}`;
+};
+const assignmentLabel = (value = "") => {
+  const labels = {
+    registrar: "Registrar",
+    hr: "HR",
+    "dean-student-welfare": "Dean Student Welfare",
+    "dean-placement": "Dean Placement",
+  };
+  return labels[value] || titleCase(value || "Assigned Review");
+};
+const groupAuditorAssignmentsForDisplay = (assignments = []) => {
+  const groups = new Map();
+  assignments.forEach((assignment, index) => {
+    const key = auditorDisplayKeyFor(assignment, index);
+    const values = safeObjectValue(assignment.values || assignment.valuesData || assignment.reviewValues || assignment.reviewValuesData);
+    const posts = uniqueValues(valueList(assignment.school || assignment.post));
+    const existing = groups.get(key);
+
+    if (!existing) {
+      groups.set(key, { ...assignment, values, displayPosts: posts, groupedAssignments: [assignment] });
+      return;
+    }
+
+    existing.values = mergeReviewValues(existing.values, values);
+    existing.displayPosts = uniqueValues([...existing.displayPosts, ...posts]);
+    existing.groupedAssignments = [...existing.groupedAssignments, assignment];
+    existing.submittedAt = existing.submittedAt || assignment.submittedAt;
+  });
+  return [...groups.values()];
+};
 
 export default function AuditReportPanel({
   schema,
@@ -178,10 +259,14 @@ export default function AuditReportPanel({
 
 function AuditorReportReviews({ fields, assignments }) {
   const visibleFields = fields.filter((field) => field.kind !== "heading");
+  const displayAssignments = groupAuditorAssignmentsForDisplay(assignments);
   return (
     <div style={styles.auditorReportGrid}>
-      {assignments.map((assignment, index) => {
-        const values = safeObjectValue(assignment.values || assignment.valuesData || assignment.reviewValues || assignment.reviewValuesData);
+      {displayAssignments.map((assignment, index) => {
+        const values = safeObjectValue(assignment.values);
+        const displayPost = (assignment.displayPosts || [assignment.school || assignment.post])
+          .map(assignmentLabel)
+          .join(", ");
         return (
           <section key={assignment.key || `${assignment.auditorId}-${assignment.school || assignment.post}-${index}`} style={styles.auditorReportCard}>
             <div style={styles.auditorReportHeader}>
@@ -191,7 +276,7 @@ function AuditorReportReviews({ fields, assignments }) {
               </div>
               <div style={styles.auditorReportChips}>
                 <span>{titleCase(assignment.auditorType || "auditor")}</span>
-                <span>{titleCase(assignment.school || assignment.post || "Assigned Review")}</span>
+                <span>{displayPost}</span>
                 <span>{assignment.submittedAt ? `Submitted ${formatDateDDMMYYYY(assignment.submittedAt)}` : "Submitted"}</span>
               </div>
             </div>

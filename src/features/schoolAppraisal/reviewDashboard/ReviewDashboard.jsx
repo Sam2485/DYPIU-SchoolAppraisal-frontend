@@ -3052,10 +3052,14 @@ function ReadOnlyFieldGrid({ fields, values }) {
 
 function AuditorAssignmentReviewGrid({ fields, assignments, fallbackAuditorType }) {
   const visibleFields = fields.filter((field) => field.kind !== "heading");
+  const displayAssignments = groupAuditorAssignmentsForDisplay(assignments);
   return (
     <div className="review-auditor-review-stack" style={styles.auditorReviewStack}>
-      {assignments.map((assignment, index) => {
+      {displayAssignments.map((assignment, index) => {
         const values = safeObjectValue(assignment.values);
+        const displayPost = (assignment.displayPosts || [assignment.post || assignment.school])
+          .map(auditorAssignmentLabel)
+          .join(", ");
         return (
           <section key={assignment.key} style={styles.auditorReviewCard}>
             <div style={styles.auditorReviewCardHeader}>
@@ -3068,7 +3072,7 @@ function AuditorAssignmentReviewGrid({ fields, assignments, fallbackAuditorType 
               </div>
               <div style={styles.auditorReviewChips}>
                 <span style={styles.auditorReviewChip}>{titleCase(assignment.auditorType || fallbackAuditorType || "auditor")}</span>
-                <span style={styles.auditorReviewChip}>{auditorAssignmentLabel(assignment.post || assignment.school)}</span>
+                <span style={styles.auditorReviewChip}>{displayPost}</span>
                 <span style={styles.auditorProgressDone}>
                   {assignment.submittedAt ? `Submitted ${formatDate(assignment.submittedAt)}` : "Submitted"}
                 </span>
@@ -3245,6 +3249,77 @@ function auditorAssignmentLabel(value = "") {
   return option?.label || titleCase(value || "Assigned review");
 }
 
+const auditorDisplayKeyFor = (assignment = {}, index = 0) => {
+  const type = normalizeUserRole(assignment.auditorType || assignment.type || "");
+  const id = String(assignment.auditorId || assignment.userId || "").trim();
+  if (id) return `id:${type}:${id}`;
+
+  const email = normalizeAuditAssignment(assignment.auditorEmail || assignment.email || assignment.username || "");
+  if (email) return `email:${type}:${email}`;
+
+  return `assignment:${assignment.key || index}`;
+};
+const isEmptyReviewValue = (value) => {
+  if (Array.isArray(value)) return value.length === 0;
+  if (isAttachmentValue(value)) return false;
+  if (value && typeof value === "object") return Object.keys(value).length === 0;
+  return String(value || "").trim() === "";
+};
+const mergeAuditorReviewValues = (base = {}, next = {}) => {
+  const merged = { ...base };
+  Object.entries(next).forEach(([fieldId, value]) => {
+    if (Array.isArray(merged[fieldId]) || Array.isArray(value)) {
+      merged[fieldId] = uniqueAttachments([
+        ...valueList(merged[fieldId]).filter(isAttachmentValue),
+        ...valueList(value).filter(isAttachmentValue),
+      ]);
+      return;
+    }
+    if (isEmptyReviewValue(merged[fieldId]) && !isEmptyReviewValue(value)) {
+      merged[fieldId] = value;
+    }
+  });
+  return merged;
+};
+const groupAuditorAssignmentsForDisplay = (assignments = []) => {
+  const groups = new Map();
+
+  assignments.forEach((assignment, index) => {
+    const key = auditorDisplayKeyFor(assignment, index);
+    const existing = groups.get(key);
+    const values = safeObjectValue(assignment.values || assignment.valuesData || assignment.reviewValues || assignment.reviewValuesData);
+    const posts = uniqueValues(valueList(assignment.post || assignment.school));
+
+    if (!existing) {
+      groups.set(key, {
+        ...assignment,
+        displayPosts: posts,
+        values,
+        attachments: uniqueAttachments(arrayValue(assignment.attachments)),
+        groupedAssignments: [assignment],
+      });
+      return;
+    }
+
+    existing.displayPosts = uniqueValues([...existing.displayPosts, ...posts]);
+    existing.values = mergeAuditorReviewValues(existing.values, values);
+    existing.attachments = uniqueAttachments([
+      ...arrayValue(existing.attachments),
+      ...arrayValue(assignment.attachments),
+    ]);
+    existing.groupedAssignments = [...existing.groupedAssignments, assignment];
+    if (existing.groupedAssignments.every(auditorAssignmentSubmitted)) {
+      existing.status = "submitted";
+      existing.submittedAt = existing.submittedAt || assignment.submittedAt;
+    } else {
+      existing.status = "pending";
+      existing.submittedAt = "";
+    }
+  });
+
+  return [...groups.values()];
+};
+
 function AuditorProgressPanel({ submission, compact = false }) {
   const progress = submission.auditorProgress || {};
   if (!progress.total) return null;
@@ -3278,19 +3353,22 @@ function AuditorProgressPanel({ submission, compact = false }) {
       )}
       {!compact && Boolean(submission.auditorAssignments?.length) && (
         <div style={styles.auditorAssignmentList}>
-          {submission.auditorAssignments.map((assignment) => {
+          {groupAuditorAssignmentsForDisplay(submission.auditorAssignments).map((assignment) => {
             const reviewValues = safeObjectValue(assignment.values);
             const documents = uniqueAttachments([
               ...arrayValue(assignment.attachments).filter(isAttachmentValue),
               ...valueList(reviewValues.auditDocumentation).filter(isAttachmentValue),
             ]);
+            const displayPost = (assignment.displayPosts || [assignment.post || assignment.school])
+              .map(auditorAssignmentLabel)
+              .join(", ");
             return (
               <div key={assignment.key} className="review-auditor-assignment-row" style={styles.auditorAssignmentRow}>
                 <div style={styles.auditorAssignmentMain}>
                   <strong>{assignment.auditorName}</strong>
                   {assignment.auditorEmail && <span>{assignment.auditorEmail}</span>}
                   <span>
-                    {titleCase(assignment.auditorType || submission.forwardedAuditorType || "auditor")} - {auditorAssignmentLabel(assignment.post || assignment.school)}
+                    {titleCase(assignment.auditorType || submission.forwardedAuditorType || "auditor")} - {displayPost}
                   </span>
                 </div>
                 <span style={auditorAssignmentSubmitted(assignment) ? styles.auditorProgressDone : styles.auditorProgressPending}>
