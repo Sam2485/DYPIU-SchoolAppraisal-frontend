@@ -948,7 +948,18 @@ textarea:disabled {
 
 @media print {
   .generated-report { --report-navy: #1f2937; width: 210mm !important; overflow-x: hidden !important; background: #fff !important; }
-  .generated-report__cover { min-height: 31mm; padding: 7mm 8mm !important; }
+  .generated-report__cover {
+    display: grid !important;
+    grid-template-columns: 21mm minmax(0, 1fr) 35mm !important;
+    align-items: center !important;
+    min-height: 31mm;
+    padding: 7mm 8mm !important;
+  }
+  .generated-report__document-meta {
+    position: static !important;
+    justify-self: end !important;
+  }
+  .generated-report__iqac-remarks { break-before: page !important; page-break-before: always !important; }
   .generated-report__cover::after { display: none; }
   .generated-report__stats { margin: 0 8mm 2mm !important; }
   .generated-report__section { padding: 3mm 8mm 1mm !important; }

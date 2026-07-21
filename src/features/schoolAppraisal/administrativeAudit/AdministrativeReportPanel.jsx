@@ -1,4 +1,5 @@
 import universityLogo from "../../../assets/images/image.png";
+import iqacLogo from "../../../assets/images/IQAS.png";
 import { SIGN_OFF_FIELD } from "../../../api/submissions";
 import { formatDateDDMMYYYY } from "../../../utils/dateFormat";
 import AdministrativePartE from "./AdministrativePartE";
@@ -130,25 +131,25 @@ export default function AdministrativeReportPanel({
   return (
     <div className="generated-report" style={styles.panel}>
       <div className="generated-report__cover" style={styles.header}>
-        <div style={styles.headerContent}>
-          <img src={universityLogo} alt="DYPIU Logo" style={styles.logo} />
-          <div>
+        <img src={universityLogo} alt="DYPIU Logo" style={styles.logo} />
+        <div style={styles.headerText}>
           <p style={styles.kicker}>{meta.university}</p>
           <h2 style={styles.title}>{meta.title}</h2>
           <p style={styles.text}>{meta.address}</p>
           <p style={styles.text}>{meta.act}</p>
           <p style={styles.year}>Academic Year {meta.academicYear}</p>
-          </div>
         </div>
-        <div className="admin-report-actions" style={styles.actions}>
-          <div style={styles.documentMeta}>
-            <span style={styles.documentBadge}>Generated Report</span>
+        <div style={styles.headerRight}>
+          <div className="generated-report__document-meta" style={styles.documentMeta}>
+            <img src={iqacLogo} alt="IQAC Logo" style={styles.documentLogo} />
             <span style={styles.generatedDate}>Prepared {formatDateDDMMYYYY(new Date())}</span>
           </div>
-          <button type="button" className="btn btn-primary" onClick={() => window.print()}>Print</button>
-          <button type="button" style={styles.secondary} onClick={onClose}>
-            Close
-          </button>
+          <div className="admin-report-actions" style={styles.actions}>
+            <button type="button" className="btn btn-primary" onClick={() => window.print()}>Print</button>
+            <button type="button" style={styles.secondary} onClick={onClose}>
+              Close
+            </button>
+          </div>
         </div>
       </div>
 
@@ -250,12 +251,12 @@ export default function AdministrativeReportPanel({
             })}
           </section>
         ))}
+        {iqacRemarks && <IqacReviewRemarks remarks={iqacRemarks} />}
         <CertificationSignOff
           signOff={data.fields[SIGN_OFF_FIELD]}
           reportCategory={reportCategory}
           currentAuditor={currentAuditor}
           previousInternalAuditor={previousInternalAuditor}
-          iqacRemarks={iqacRemarks}
         />
       </div>
     </div>
@@ -320,7 +321,6 @@ function CertificationSignOff({
   reportCategory = "",
   currentAuditor = {},
   previousInternalAuditor = {},
-  iqacRemarks = "",
 }) {
   const submittedBy = signOff?.submittedBy || {};
   const storedAuditor = signOff?.auditedBy || signOff?.auditorBy || {};
@@ -350,17 +350,19 @@ function CertificationSignOff({
       <div style={styles.signatureBlock}>
         <h3 style={styles.signerTitle}>Approved by {approverLabel(approvedBy.role)}</h3>
         <SignerDetails signer={approvedBy} pendingText="Pending approval" />
-        {iqacRemarks && (
-          <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid #e2e8f0" }}>
-            <span style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase", color: "#475569", display: "block", marginBottom: 4 }}>
-              IQAC Review Remarks
-            </span>
-            <span style={{ fontSize: 13, color: "#1e293b", whiteSpace: "pre-wrap" }}>
-              {iqacRemarks}
-            </span>
-          </div>
-        )}
       </div>
+    </section>
+  );
+}
+
+function IqacReviewRemarks({ remarks }) {
+  return (
+    <section className="generated-report__iqac-remarks" style={styles.iqacReviewSection}>
+      <div style={styles.moduleHeading}>
+        <span style={styles.sectionNumber}>IQ</span>
+        <h3 style={styles.moduleTitle}>IQAC Review Remarks</h3>
+      </div>
+      <p style={styles.iqacReviewText}>{remarks}</p>
     </section>
   );
 }
@@ -404,8 +406,9 @@ const styles = {
     gap: 16,
   },
   header: {
-    display: "flex",
-    justifyContent: "space-between",
+    display: "grid",
+    gridTemplateColumns: "76px minmax(0, 1fr) 150px",
+    alignItems: "center",
     gap: 18,
     padding: 22,
     border: "1px solid #dbe3ef",
@@ -414,11 +417,17 @@ const styles = {
     background: "#fff",
     boxShadow: "0 12px 26px rgba(15, 23, 42, 0.04)",
   },
-  headerContent: {
-    display: "flex",
-    alignItems: "flex-start",
-    gap: 16,
+  headerText: {
     minWidth: 0,
+    textAlign: "center",
+  },
+  headerRight: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-end",
+    gap: 12,
+    flexShrink: 0,
+    justifySelf: "end",
   },
   logo: {
     width: 72,
@@ -465,8 +474,12 @@ const styles = {
     fontWeight: 900,
     cursor: "pointer",
   },
-  documentMeta: { display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 5, marginRight: 4 },
-  documentBadge: { padding: "6px 10px", borderRadius: 999, color: "#1d4ed8", background: "#dbeafe", fontSize: 10, fontWeight: 800, letterSpacing: ".06em", textTransform: "uppercase" },
+  documentMeta: { display: "flex", flexDirection: "column", alignItems: "center", gap: 5, width: 132 },
+  documentLogo: {
+    width: 54,
+    height: 54,
+    objectFit: "contain",
+  },
   generatedDate: { color: "#64748b", fontSize: 11 },
   body: {
     display: "flex",
@@ -628,6 +641,22 @@ const styles = {
     fontWeight: 800,
   },
   signerTitle: { margin: "0 0 12px", color: "#0f172a", fontSize: 14 },
+  iqacReviewSection: {
+    breakBefore: "page",
+    pageBreakBefore: "always",
+    padding: 18,
+    border: "1px solid #dbe3ef",
+    borderRadius: 14,
+    background: "#fff",
+  },
+  iqacReviewText: {
+    margin: 0,
+    color: "#1e293b",
+    fontSize: 14,
+    fontWeight: 700,
+    lineHeight: 1.65,
+    whiteSpace: "pre-wrap",
+  },
   pendingApproval: { padding: "18px 0", color: "#64748b", fontSize: 13, fontWeight: 700 },
   signatureRow: {
     display: "grid",

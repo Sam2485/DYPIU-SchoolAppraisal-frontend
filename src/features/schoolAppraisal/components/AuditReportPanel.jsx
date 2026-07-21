@@ -1,5 +1,6 @@
 import { columnsWithSerial } from "./tableHelpers";
 import universityLogo from "../../../assets/images/image.png";
+import iqacLogo from "../../../assets/images/IQAS.png";
 import { SIGN_OFF_FIELD } from "../../../api/submissions";
 import { formatDateDDMMYYYY } from "../../../utils/dateFormat";
 import { getAttachmentUrl } from "../../../utils/attachment";
@@ -147,15 +148,15 @@ export default function AuditReportPanel({
     <div className="generated-report" style={styles.panel}>
       <header className="generated-report__cover" style={styles.header}>
         <img src={universityLogo} alt="DYPIU Logo" style={styles.logo} />
-        <div>
+        <div style={styles.headerText}>
           <p style={styles.kicker}>{schema.header.university}</p>
           <h1 style={styles.title}>{schema.title}</h1>
           <p style={styles.meta}>{schema.header.address}</p>
           <p style={styles.meta}>{schema.header.act}</p>
           <p style={styles.year}>Academic Year {schema.academicYear}</p>
         </div>
-        <div style={styles.documentMeta}>
-          <span style={styles.documentBadge}>Generated Report</span>
+        <div className="generated-report__document-meta" style={styles.documentMeta}>
+          <img src={iqacLogo} alt="IQAC Logo" style={styles.documentLogo} />
           <span style={styles.generatedDate}>Prepared {formatDateDDMMYYYY(new Date())}</span>
         </div>
       </header>
@@ -247,13 +248,14 @@ export default function AuditReportPanel({
         </section>
       ))}
 
+      {iqacRemarks && <IqacReviewRemarks remarks={iqacRemarks} />}
+
       <CertificationSignOff
         signOff={values[SIGN_OFF_FIELD]}
         submissionSchool={submissionSchool}
         reportCategory={reportCategory}
         currentAuditor={currentAuditor}
         previousInternalAuditor={previousInternalAuditor}
-        iqacRemarks={iqacRemarks}
       />
     </div>
   );
@@ -318,7 +320,6 @@ function CertificationSignOff({
   reportCategory = "",
   currentAuditor = {},
   previousInternalAuditor = {},
-  iqacRemarks = "",
 }) {
   const submittedBy = signOff?.submittedBy || {};
   const storedAuditor = signOff?.auditedBy || signOff?.auditorBy || {};
@@ -351,17 +352,19 @@ function CertificationSignOff({
       <div style={styles.signatureBlock}>
         <h3 style={styles.signerTitle}>Approved by {approverLabel(approvedBy.role)}</h3>
         <SignerDetails signer={approvedBy} pendingText="Pending approval" />
-        {iqacRemarks && (
-          <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid #e2e8f0" }}>
-            <span style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase", color: "#475569", display: "block", marginBottom: 4 }}>
-              IQAC Review Remarks
-            </span>
-            <span style={{ fontSize: 13, color: "#1e293b", whiteSpace: "pre-wrap" }}>
-              {iqacRemarks}
-            </span>
-          </div>
-        )}
       </div>
+    </section>
+  );
+}
+
+function IqacReviewRemarks({ remarks }) {
+  return (
+    <section className="generated-report__iqac-remarks" style={styles.iqacReviewSection}>
+      <div style={styles.sectionHeading}>
+        <span style={styles.sectionNumber}>IQ</span>
+        <h2 style={styles.sectionTitle}>IQAC Review Remarks</h2>
+      </div>
+      <p style={styles.iqacReviewText}>{remarks}</p>
     </section>
   );
 }
@@ -405,16 +408,20 @@ const styles = {
     gap: 16,
   },
   header: {
-    display: "flex",
+    display: "grid",
+    gridTemplateColumns: "76px minmax(0, 1fr) 132px",
     alignItems: "center",
-    justifyContent: "space-between",
-    gap: 16,
+    gap: 18,
     padding: 22,
     border: "1px solid #dbe3ef",
     borderTop: "5px solid #2563eb",
     borderRadius: 16,
     background: "#fff",
     boxShadow: "0 14px 36px rgba(15, 23, 42, 0.07)",
+  },
+  headerText: {
+    minWidth: 0,
+    textAlign: "center",
   },
   logo: {
     width: 72,
@@ -445,8 +452,12 @@ const styles = {
     fontWeight: 900,
     fontSize: 14,
   },
-  documentMeta: { display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 7, flexShrink: 0 },
-  documentBadge: { padding: "6px 10px", borderRadius: 999, color: "#1d4ed8", background: "#dbeafe", fontSize: 10, fontWeight: 800, letterSpacing: ".06em", textTransform: "uppercase" },
+  documentMeta: { display: "flex", flexDirection: "column", alignItems: "center", gap: 6, justifySelf: "end", width: 132 },
+  documentLogo: {
+    width: 54,
+    height: 54,
+    objectFit: "contain",
+  },
   generatedDate: { color: "#64748b", fontSize: 11 },
   section: {
     padding: 18,
@@ -615,6 +626,22 @@ const styles = {
     fontWeight: 800,
   },
   signerTitle: { margin: "0 0 12px", color: "#0f172a", fontSize: 14 },
+  iqacReviewSection: {
+    breakBefore: "page",
+    pageBreakBefore: "always",
+    padding: 18,
+    border: "1px solid #dbe3ef",
+    borderRadius: 14,
+    background: "#fff",
+  },
+  iqacReviewText: {
+    margin: 0,
+    color: "#1e293b",
+    fontSize: 14,
+    fontWeight: 700,
+    lineHeight: 1.65,
+    whiteSpace: "pre-wrap",
+  },
   pendingApproval: { padding: "18px 0", color: "#64748b", fontSize: 13, fontWeight: 700 },
   signatureRow: {
     display: "grid",
