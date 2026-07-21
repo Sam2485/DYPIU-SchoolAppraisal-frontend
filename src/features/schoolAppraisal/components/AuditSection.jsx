@@ -1,6 +1,23 @@
 //renders a section of the audit form, like part A, part B, etc. It can contain fields and tables
 import AuditTable from "./AuditTable";
 import DateInput from "./DateInput";
+import { getAttachmentUrl } from "../../../utils/attachment";
+
+const ACADEMIC_PART_E_SECTION_ID = "part-e-observations";
+
+const isAttachmentValue = (value) =>
+  value &&
+  typeof value === "object" &&
+  !Array.isArray(value) &&
+  (value.url || value.publicUrl || value.downloadUrl || value.name || value.fileName);
+
+const hasPartEValues = (values = {}) =>
+  ["auditObservations", "auditRecommendations", "auditDocumentation"].some((fieldId) => {
+    const value = values?.[fieldId];
+    if (Array.isArray(value)) return value.length > 0;
+    if (isAttachmentValue(value)) return true;
+    return String(value || "").trim().length > 0;
+  });
 
 function FieldGrid({ fields, values, onFieldChange, readOnly = false }) {
   return (
@@ -88,11 +105,110 @@ function TableList({ tableDefinitions, tableValues, values, onFieldChange, onTab
   );
 }
 
-export default function AuditSection({ section, values, tables, onFieldChange, onTableChange, onAddRow, onDeleteLastRow, onUploadAttachment, onDeleteAttachment, readOnly = false }) {
+function ReadOnlyPartEValue({ value }) {
+  if (Array.isArray(value)) {
+    const attachments = value.filter(isAttachmentValue);
+    if (attachments.length) {
+      return (
+        <div style={styles.attachmentList}>
+          {attachments.map((file, index) => {
+            const url = file.url || file.publicUrl || file.downloadUrl;
+            const name = file.name || file.fileName || file.filename || "View attachment";
+            return url ? (
+              <a key={`${url}-${index}`} href={getAttachmentUrl(url)} target="_blank" rel="noreferrer" style={styles.attachmentLink}>
+                {name}
+              </a>
+            ) : (
+              <span key={`${name}-${index}`}>{name}</span>
+            );
+          })}
+        </div>
+      );
+    }
+
+    return value.length ? <span>{value.join(", ")}</span> : <span style={styles.emptyText}>-</span>;
+  }
+
+  if (isAttachmentValue(value)) {
+    const url = value.url || value.publicUrl || value.downloadUrl;
+    const name = value.name || value.fileName || value.filename || "View attachment";
+    return url ? (
+      <a href={getAttachmentUrl(url)} target="_blank" rel="noreferrer" style={styles.attachmentLink}>
+        {name}
+      </a>
+    ) : (
+      <span>{name}</span>
+    );
+  }
+
+  const text = String(value || "").trim();
+  return text ? <span style={styles.readOnlyText}>{text}</span> : <span style={styles.emptyText}>-</span>;
+}
+
+function PartEAuditorBlock({ title, fields, values, auditor }) {
+  if (!hasPartEValues(values)) return null;
+
+  return (
+    <section style={styles.partEReviewBlock}>
+      <div style={styles.partEReviewHeader}>
+        <h3 style={styles.partEReviewTitle}>{title}</h3>
+        {auditor?.name && <span style={styles.partEReviewMeta}>{auditor.name}</span>}
+      </div>
+      <div style={styles.partEReviewGrid}>
+        {fields.map((field) => (
+          <div key={field.id} style={styles.partEReviewField}>
+            <span style={styles.partEReviewLabel}>{field.label}</span>
+            <ReadOnlyPartEValue value={values?.[field.id]} />
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function AcademicPartEReviewPanel({ fields, review }) {
+  return (
+    <div style={styles.partEReviewPanel}>
+      <PartEAuditorBlock
+        title="Internal Auditor Part E"
+        fields={fields}
+        values={review?.internalValues}
+        auditor={review?.internalAuditor}
+      />
+      {review?.reportCategory === "external" && (
+        <PartEAuditorBlock
+          title="External Auditor Part E"
+          fields={fields}
+          values={review?.externalValues}
+          auditor={review?.externalAuditor}
+        />
+      )}
+      {review?.iqacRemarks && (
+        <section style={styles.partEReviewBlock}>
+          <div style={styles.partEReviewHeader}>
+            <h3 style={styles.partEReviewTitle}>IQAC Review Remarks</h3>
+          </div>
+          <p style={styles.readOnlyText}>{review.iqacRemarks}</p>
+        </section>
+      )}
+    </div>
+  );
+}
+
+export default function AuditSection({ section, values, tables, onFieldChange, onTableChange, onAddRow, onDeleteLastRow, onUploadAttachment, onDeleteAttachment, readOnly = false, academicPartEReview = null }) {
   const blocks = section.blocks || [
     ...(section.fields?.length ? [{ type: "fields", fields: section.fields }] : []),
     ...(section.tables?.length ? [{ type: "tables", tables: section.tables }] : []),
   ];
+  const showAcademicPartEReview =
+    readOnly &&
+    section.id === ACADEMIC_PART_E_SECTION_ID &&
+    academicPartEReview &&
+    (
+      hasPartEValues(academicPartEReview.internalValues) ||
+      hasPartEValues(academicPartEReview.externalValues) ||
+      String(academicPartEReview.iqacRemarks || "").trim()
+    );
 
   return (
     <section className="audit-section-card" id={section.id} style={styles.section}>
@@ -102,6 +218,10 @@ export default function AuditSection({ section, values, tables, onFieldChange, o
 
       {blocks.map((block, index) => {
         if (block.type === "fields") {
+          if (showAcademicPartEReview) {
+            return <AcademicPartEReviewPanel key={`part-e-review-${index}`} fields={block.fields} review={academicPartEReview} />;
+          }
+
           return <FieldGrid key={`fields-${index}`} fields={block.fields} values={values} onFieldChange={onFieldChange} readOnly={readOnly} />;
         }
 
@@ -203,5 +323,76 @@ const styles = {
     display: "flex",
     flexDirection: "column",
     gap: 14,
+  },
+  partEReviewPanel: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 14,
+  },
+  partEReviewBlock: {
+    padding: 16,
+    border: "1px solid #dbe3ef",
+    borderRadius: 12,
+    background: "#f8fafc",
+  },
+  partEReviewHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    marginBottom: 12,
+    paddingBottom: 10,
+    borderBottom: "1px solid #e2e8f0",
+  },
+  partEReviewTitle: {
+    margin: 0,
+    color: "#0f172a",
+    fontSize: 15,
+    fontWeight: 800,
+  },
+  partEReviewMeta: {
+    color: "#475569",
+    fontSize: 12,
+    fontWeight: 700,
+  },
+  partEReviewGrid: {
+    display: "grid",
+    gridTemplateColumns: "1fr",
+    gap: 12,
+  },
+  partEReviewField: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+  },
+  partEReviewLabel: {
+    color: "#334155",
+    fontSize: 12,
+    fontWeight: 750,
+  },
+  readOnlyText: {
+    margin: 0,
+    color: "#0f172a",
+    fontSize: 13,
+    fontWeight: 650,
+    lineHeight: 1.6,
+    whiteSpace: "pre-wrap",
+  },
+  emptyText: {
+    color: "#94a3b8",
+    fontSize: 13,
+    fontWeight: 700,
+  },
+  attachmentList: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-start",
+    gap: 6,
+  },
+  attachmentLink: {
+    color: "#1d4ed8",
+    fontSize: 13,
+    fontWeight: 750,
+    textDecoration: "none",
   },
 };

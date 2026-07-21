@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { getApiErrorMessage } from "../../../api/client";
-import { buildSubmissionPayload, deleteAttachment, fetchMyDraft, normalizeDraft, saveDraft, signOffProfileFromSession, submitDraft, uploadAttachments, withSubmitterSignOff } from "../../../api/submissions";
+import { buildSubmissionPayload, deleteAttachment, fetchMyDraft, fetchSubmissionSnapshots, normalizeDraft, saveDraft, signOffProfileFromSession, submitDraft, uploadAttachments, withSubmitterSignOff } from "../../../api/submissions";
 import universityLogo from "../../../assets/images/image.png";
 import AuditReportPanel from "./AuditReportPanel";
 import AuditSection from "./AuditSection";
@@ -9,6 +9,7 @@ import SubmissionConfirmation from "./SubmissionConfirmation";
 import { emptySubmissionConfirmation, isSubmissionConfirmed } from "./submissionConfirmationState";
 import { columnsWithSerial, serialColumnFor } from "./tableHelpers";
 import { scrollPageToTop } from "../../../utils/scrollToTop";
+import { academicAudit2025Schema } from "../formSchemas";
 
 const emptyRowFor = (columns) =>
   columnsWithSerial(columns).reduce((row, column) => {
@@ -33,6 +34,125 @@ const withSerialNumbers = (columns, rows) => {
     ...(serialColumn && !row[serialColumn] ? { [serialColumn]: String(index + 1) } : {}),
   }));
 };
+
+const ACADEMIC_PART_E_FIELD_IDS = ["auditObservations", "auditRecommendations", "auditDocumentation"];
+
+const safeJsonParse = (value, fallback) => {
+  if (value == null || value === "") return fallback;
+  if (typeof value !== "string") return value;
+
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+};
+
+const responseList = (payload) => {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.data)) return payload.data;
+  if (Array.isArray(payload?.submissions)) return payload.submissions;
+  if (Array.isArray(payload?.snapshots)) return payload.snapshots;
+  if (Array.isArray(payload?.history)) return payload.history;
+  return [];
+};
+
+const snapshotPayload = (entry = {}) => entry.submission || entry.snapshot || entry.data || entry;
+const normalizeStatus = (value = "") => String(value || "").trim().toLowerCase().replaceAll("_", "-");
+const normalizeCategory = (value = "") => String(value || "").trim().toLowerCase().replaceAll("_", "-");
+const normalizeHistoryDraft = (entry = {}, fallbackValues = {}, fallbackTables = {}) => {
+  const normalized = normalizeDraft(snapshotPayload(entry), fallbackValues, fallbackTables);
+  return {
+    ...normalized,
+    version: Number(entry.version || entry.snapshotVersion || entry.reportVersion || normalized.version || 0),
+    reportCategory: normalizeCategory(entry.reportCategory || entry.approvedReportCategory || entry.category || normalized.reportCategory),
+    auditCycle: entry.auditCycle || entry.cycleLabel || normalized.auditCycle,
+  };
+};
+const isAttachmentValue = (value) =>
+  value &&
+  typeof value === "object" &&
+  !Array.isArray(value) &&
+  (value.url || value.publicUrl || value.downloadUrl || value.name || value.fileName);
+
+const hasAcademicPartEValues = (values = {}) =>
+  ACADEMIC_PART_E_FIELD_IDS.some((fieldId) => {
+    const value = values?.[fieldId];
+    if (Array.isArray(value)) return value.length > 0;
+    if (isAttachmentValue(value)) return true;
+    return String(value || "").trim().length > 0;
+  });
+
+const getAuditorSignOff = (entry = {}) => {
+  const signOff = entry.values?.__auditSignOff || {};
+  const auditedBy = signOff.auditedBy || signOff.auditorBy || {};
+  return {
+    name: auditedBy.name || entry.auditorReviewedBy || "",
+    designation: auditedBy.designation || entry.auditorReviewedByDesignation || "",
+    role: auditedBy.role || entry.auditorReviewedByRole || "",
+    email: auditedBy.email || entry.auditorReviewedByEmail || "",
+    date: auditedBy.date || entry.auditorReviewedOn || "",
+  };
+};
+
+const normalizedAssignmentValues = (assignment = {}) =>
+  safeJsonParse(assignment.values || assignment.valuesData || assignment.reviewValues || assignment.reviewValuesData, {});
+
+const assignmentAuditor = (assignment = {}) => ({
+  name: assignment.auditorName || assignment.name || "",
+  designation: assignment.auditorDesignation || assignment.designation || "",
+  role: assignment.auditorRole || assignment.role || assignment.auditorType || "",
+  email: assignment.auditorEmail || assignment.email || "",
+  date: assignment.submittedAt || assignment.auditorReviewedOn || "",
+});
+
+const assignmentForType = (assignments = [], auditorType = "") =>
+  assignments.find((assignment) =>
+    normalizeCategory(assignment.auditorType || assignment.forwardedAuditorType || assignment.type).includes(auditorType) &&
+    hasAcademicPartEValues(normalizedAssignmentValues(assignment))
+  );
+
+const buildAcademicPartEReview = (draft = {}, history = []) => {
+  const status = normalizeStatus(draft.overallStatus || draft.status);
+  if (status !== "approved") return null;
+
+  const reportCategory = normalizeCategory(draft.reportCategory || draft.cycleType);
+  const assignments = Array.isArray(draft.auditorAssignments) ? draft.auditorAssignments : [];
+  const internalAssignment = assignmentForType(assignments, "internal");
+  const externalAssignment = assignmentForType(assignments, "external");
+  const sortedHistory = [...history].sort((first, second) => Number(second.version || 0) - Number(first.version || 0));
+  const previousInternal = sortedHistory.find((entry) =>
+    (
+      normalizeCategory(entry.reportCategory || entry.cycleType) === "internal" ||
+      (reportCategory === "external" && Number(entry.version || 0) < Number(draft.version || 0))
+    ) &&
+    hasAcademicPartEValues(entry.values)
+  );
+  const currentHasPartE = hasAcademicPartEValues(draft.values);
+  const internalValues =
+    internalAssignment ? normalizedAssignmentValues(internalAssignment) :
+    reportCategory === "internal" && currentHasPartE ? draft.values :
+    previousInternal?.values || {};
+  const externalValues =
+    externalAssignment ? normalizedAssignmentValues(externalAssignment) :
+    reportCategory === "external" && currentHasPartE ? draft.values :
+    {};
+
+  if (!hasAcademicPartEValues(internalValues) && !hasAcademicPartEValues(externalValues) && !String(draft.remarks || "").trim()) {
+    return null;
+  }
+
+  return {
+    reportCategory,
+    internalValues,
+    externalValues,
+    iqacRemarks: draft.remarks || "",
+    internalAuditor: internalAssignment ? assignmentAuditor(internalAssignment) : getAuditorSignOff(previousInternal || draft),
+    externalAuditor: externalAssignment ? assignmentAuditor(externalAssignment) : getAuditorSignOff(draft),
+  };
+};
+
+const academicPartESection = academicAudit2025Schema.sections.find((section) => section.id === "part-e-observations");
 
 function buildInitialValues(schema) {
   return schema.sections.reduce((values, section) => {
@@ -79,6 +199,7 @@ export default function AuditForm({ schema, academicYear = schema.academicYear, 
   const [submissionConfirmation, setSubmissionConfirmation] = useState(emptySubmissionConfirmation);
   const [hasExistingSubmission, setHasExistingSubmission] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [academicPartEReview, setAcademicPartEReview] = useState(null);
   const [printReportAfterRender, setPrintReportAfterRender] = useState(false);
   const activeSectionIndex = Math.max(0, schema.sections.findIndex((section) => section.id === activeSectionId));
   const isLastSection = activeSectionIndex === schema.sections.length - 1;
@@ -107,6 +228,23 @@ export default function AuditForm({ schema, academicYear = schema.academicYear, 
       try {
         const { data } = await fetchMyDraft(auditType);
         const draft = normalizeDraft(data, initialValues, initialTables);
+        let historyEntries = responseList(draft.versionHistory).map((entry, index) =>
+          normalizeHistoryDraft(entry, initialValues, initialTables, index)
+        );
+
+        if (auditType === "academic" && draft.id && normalizeStatus(draft.overallStatus || draft.status) === "approved") {
+          try {
+            const { data: snapshotsData } = await fetchSubmissionSnapshots(draft.id);
+            historyEntries = [
+              ...historyEntries,
+              ...responseList(snapshotsData).map((entry, index) =>
+                normalizeHistoryDraft(entry, initialValues, initialTables, index)
+              ),
+            ];
+          } catch {
+            // History is optional for internal approvals. External approvals still render current Part E when snapshots are unavailable.
+          }
+        }
 
         if (!isActive) return;
         setValues(draft.values);
@@ -114,6 +252,7 @@ export default function AuditForm({ schema, academicYear = schema.academicYear, 
         setAttachments(draft.attachments);
         setHasExistingSubmission(draft.exists);
         setIsSubmitted(draft.isSubmitted);
+        setAcademicPartEReview(auditType === "academic" ? buildAcademicPartEReview(draft, historyEntries) : null);
       } catch (error) {
         if (isActive) setStatus(getApiErrorMessage(error, "Could not load your draft from the server."));
       } finally {
@@ -205,6 +344,7 @@ export default function AuditForm({ schema, academicYear = schema.academicYear, 
     setValues(initialValues);
     setTables(initialTables);
     setAttachments([]);
+    setAcademicPartEReview(null);
     setIsSubmitted(false);
     setStatus("Form cleared.");
   };
@@ -238,6 +378,15 @@ export default function AuditForm({ schema, academicYear = schema.academicYear, 
   };
 
   if (reportMode) {
+    const reportPartEValues = academicPartEReview?.reportCategory === "external"
+      ? academicPartEReview?.externalValues
+      : academicPartEReview?.internalValues;
+    const reportValues = academicPartEReview ? { ...values, ...reportPartEValues } : values;
+    const reportSchema =
+      academicPartEReview && academicPartESection && !schema.sections.some((section) => section.id === academicPartESection.id)
+        ? { ...schema, sections: [...schema.sections, academicPartESection] }
+        : schema;
+
     return (
       <div className="academic-report-view" style={styles.form}>
         <div className="academic-report-actions" style={styles.actions}>
@@ -249,10 +398,19 @@ export default function AuditForm({ schema, academicYear = schema.academicYear, 
           </button>
         </div>
         <AuditReportPanel
-          schema={{ ...schema, academicYear }}
-          values={values}
+          schema={{ ...reportSchema, academicYear }}
+          values={reportValues}
           tables={tables}
           submissionSchool={sessionStorage.getItem("school") || values.schoolName || ""}
+          reportCategory={academicPartEReview?.reportCategory || ""}
+          currentAuditor={
+            academicPartEReview?.reportCategory === "external"
+              ? academicPartEReview?.externalAuditor
+              : academicPartEReview?.internalAuditor
+          }
+          previousInternalAuditor={academicPartEReview?.internalAuditor}
+          previousInternalValues={academicPartEReview?.reportCategory === "external" ? academicPartEReview?.internalValues : {}}
+          iqacRemarks={academicPartEReview?.iqacRemarks}
         />
       </div>
     );
@@ -315,8 +473,24 @@ export default function AuditForm({ schema, academicYear = schema.academicYear, 
                 setAttachments((current) => current.filter((file) => file.url !== attachment.url));
               }}
               readOnly={readOnly}
+              academicPartEReview={auditType === "academic" ? academicPartEReview : null}
             />
           ))}
+        {!loadingDraft && isLastSection && academicPartEReview && academicPartESection && (
+          <AuditSection
+            section={academicPartESection}
+            values={values}
+            tables={tables}
+            onFieldChange={() => {}}
+            onTableChange={() => {}}
+            onAddRow={() => {}}
+            onDeleteLastRow={() => {}}
+            onUploadAttachment={async () => []}
+            onDeleteAttachment={async () => {}}
+            readOnly
+            academicPartEReview={academicPartEReview}
+          />
+        )}
       </div>
 
       {isLastSection && !isSubmitted && (

@@ -156,7 +156,15 @@ export const normalizeUserProfile = (payload = {}) => {
 };
 
 export const normalizeDraft = (payload = {}, fallbackValues = {}, fallbackTables = {}) => {
-  const draft = payload.data || payload.submission || payload;
+  const unwrapDraftPayload = (value = {}) => {
+    if (Array.isArray(value)) return value[0] || {};
+    if (!value || typeof value !== "object") return {};
+    if (value.valuesData || value.values || value.fieldsData || value.fields || value.tablesData || value.tables || value.status || value.submissionId || value.id) {
+      return value;
+    }
+    return unwrapDraftPayload(value.submission || value.draft || value.data || {});
+  };
+  const draft = unwrapDraftPayload(payload);
   const valuesData = draft.valuesData ?? draft.values ?? draft.fieldsData ?? draft.fields;
   const tablesData = draft.tablesData ?? draft.tables;
   const values = {
@@ -211,6 +219,15 @@ export const normalizeDraft = (payload = {}, fallbackValues = {}, fallbackTables
       ...safeJsonParse(tablesData, {}),
     },
     attachments: safeJsonParse(draft.attachments, []),
+    auditorAssignments: safeJsonParse(draft.auditorAssignments || draft.auditorReviews || draft.assignments, []),
+    versionHistory: safeJsonParse(draft.versionHistory || draft.previousVersions || draft.snapshots, []),
+    remarks: draft.remarks || draft.iqacRemarks || draft.reviewRemarks || "",
+    auditCycle: draft.auditCycle || draft.cycleLabel || draft.auditPeriod || draft.academicYear || "",
+    auditorReviewedBy: draft.auditorReviewedBy || draft.auditedBy || "",
+    auditorReviewedByDesignation: draft.auditorReviewedByDesignation || draft.auditorDesignation || "",
+    auditorReviewedByRole: draft.auditorReviewedByRole || draft.auditorRole || "",
+    auditorReviewedByEmail: draft.auditorReviewedByEmail || draft.auditorEmail || "",
+    auditorReviewedOn: draft.auditorReviewedOn || draft.auditedOn || "",
   };
 };
 
