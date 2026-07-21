@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { getApiErrorMessage } from "../../../api/client";
 import { createUser, deleteUser, fetchUsers, updateUser } from "../../../api/users";
 import { formatDateDDMMYYYY } from "../../../utils/dateFormat";
@@ -638,7 +639,14 @@ export default function UserManagementPanel() {
         </div>
       </div>
 
-      {deleteTarget && (
+      <DeleteUserDialog
+        target={deleteTarget}
+        deletingId={deletingId}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={handleDelete}
+      />
+
+      {shouldRenderInlineDeleteDialog() && deleteTarget && (
         <div style={styles.modalOverlay} role="dialog" aria-modal="true" aria-labelledby="delete-user-title">
           <div style={styles.modalCard}>
             <div style={styles.warningIcon}>!</div>
@@ -911,6 +919,55 @@ function AdministrativePostMultiSelect({ selected, onToggle }) {
         </div>
       )}
     </details>
+  );
+}
+
+function shouldRenderInlineDeleteDialog() {
+  return false;
+}
+
+function DeleteUserDialog({ target, deletingId, onCancel, onConfirm }) {
+  if (!target || typeof document === "undefined") return null;
+
+  return createPortal(
+    <div style={styles.modalOverlay} role="dialog" aria-modal="true" aria-labelledby="delete-user-title">
+      <div style={styles.modalCard}>
+        <div style={styles.warningIcon}>!</div>
+        <div>
+          <p style={styles.kicker}>Delete user</p>
+          <h3 id="delete-user-title" style={styles.modalTitle}>Remove this account?</h3>
+          <p style={styles.modalText}>
+            This will delete <strong>{target.name}</strong> ({target.email}) from user management.
+          </p>
+          <div style={styles.deleteUserPreview}>
+            <span style={styles.previewAvatar}>{target.name?.charAt(0)?.toUpperCase() || "U"}</span>
+            <span>
+              <strong>{target.name}</strong>
+              <small style={styles.previewMeta}>{target.role} - {target.assignment}</small>
+            </span>
+          </div>
+        </div>
+        <div style={styles.modalActions}>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={onCancel}
+            disabled={deletingId === target.id}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            style={styles.confirmDeleteButton}
+            onClick={onConfirm}
+            disabled={deletingId === target.id}
+          >
+            {deletingId === target.id ? "Deleting..." : "Yes, Delete"}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
