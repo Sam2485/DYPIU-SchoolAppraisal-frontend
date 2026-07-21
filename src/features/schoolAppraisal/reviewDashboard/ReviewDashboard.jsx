@@ -30,7 +30,7 @@ import AdministrativeReportPanel from "../administrativeAudit/AdministrativeRepo
 import AdministrativePartE from "../administrativeAudit/AdministrativePartE";
 import { academicAudit2025Schema } from "../formSchemas";
 import UserManagementPanel from "../userManagement/UserManagementPanel";
-import { ADMINISTRATIVE_POSTS, SCHOOL_OPTIONS, schoolGroupFor } from "../userManagement/userManagementConfig";
+import { ADMINISTRATIVE_POSTS, SCHOOL_OPTIONS, schoolGroupFor, canonicalSchoolCode } from "../userManagement/userManagementConfig";
 import BackupRestorePanel from "./BackupRestorePanel";
 import { formatDateDDMMYYYY } from "../../../utils/dateFormat";
 import { getAttachmentUrl } from "../../../utils/attachment";
@@ -1913,15 +1913,29 @@ function OverviewPanel({ metrics, submissions, loading, onOpen }) {
 }
 
 function buildSchoolProgress(submissions) {
-  return Object.values(submissions.reduce((schools, submission) => {
-    const school = submission.school || "Unknown school";
-    const current = schools[school] || { school, total: 0, approved: 0, pending: 0 };
-    current.total += 1;
-    if (submission.status === "approved") current.approved += 1;
-    else current.pending += 1;
-    schools[school] = current;
-    return schools;
-  }, {})).sort((a, b) => b.pending - a.pending || a.school.localeCompare(b.school));
+  const schoolMap = {};
+  
+  // Pre-initialize all 8 official university schools
+  SCHOOL_OPTIONS.forEach((opt) => {
+    const code = opt.code.toUpperCase();
+    schoolMap[code] = { school: code, total: 0, approved: 0, pending: 0 };
+  });
+
+  (submissions || []).forEach((submission) => {
+    const rawSchool = submission.school;
+    const school = rawSchool ? canonicalSchoolCode(rawSchool) || rawSchool.trim().toUpperCase() : "Unknown school";
+    if (!schoolMap[school]) {
+      schoolMap[school] = { school, total: 0, approved: 0, pending: 0 };
+    }
+    schoolMap[school].total += 1;
+    if (submission.status === "approved" || submission.status === "APPROVED" || submission.status === "FINAL") {
+      schoolMap[school].approved += 1;
+    } else {
+      schoolMap[school].pending += 1;
+    }
+  });
+
+  return Object.values(schoolMap).sort((a, b) => b.total - a.total || a.school.localeCompare(b.school));
 }
 
 function AdvancedOverviewPanel({ metrics, submissions, loading }) {
