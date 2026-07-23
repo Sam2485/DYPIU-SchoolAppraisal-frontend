@@ -120,7 +120,7 @@ const newSchoolEntry = (code) => {
   return {
     schoolCode: code,
     schoolName: school?.name || code,
-    placementPrograms: [],
+    placementPrograms: [emptyRow(PLACEMENT_COLUMNS, 0)],
     activities: [emptyRow(ACTIVITY_COLUMNS, 0, { Activity: "Internship" })],
     careerGuidanceActivities: [emptyRow(SESSION_ACTIVITY_COLUMNS, 0)],
     industryInteractionActivities: [emptyRow(SESSION_ACTIVITY_COLUMNS, 0)],
@@ -215,6 +215,7 @@ export default function AdministrativePartE({
     const table = tableDefinitions[key];
     const storedRows = school[key] || [];
     const rows = !storedRows.length && [
+      "placementPrograms",
       "activities",
       "careerGuidanceActivities",
       "industryInteractionActivities",
@@ -248,7 +249,7 @@ export default function AdministrativePartE({
         onUploadAttachment={onUploadAttachment}
         onDeleteAttachment={onDeleteAttachment}
         readOnly={readOnly}
-        allowManualAdd={!["placementPrograms"].includes(key)}
+        allowManualAdd
         showRowControls={!readOnly}
       />
     );
