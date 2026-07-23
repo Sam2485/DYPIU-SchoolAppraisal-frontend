@@ -273,6 +273,13 @@ const blocksFor = (section) =>
 const sectionsForAudit = (auditType) => auditType === "academic" ? academicAudit2025Schema.sections : administrativeAuditModules;
 
 const normalizeAuditType = (value = "") => String(value).toLowerCase().includes("admin") ? "administrative" : "academic";
+const normalizeOptionalAuditType = (value = "") => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return "";
+  if (normalized.includes("admin")) return "administrative";
+  if (normalized.includes("academic")) return "academic";
+  return "";
+};
 const normalizeStatus = (value = "submitted") => String(value).toLowerCase().replaceAll("_", "-");
 const backendStatusFor = (status) => status.toUpperCase().replaceAll("-", "_");
 const isAuditorRole = (role = "") => String(role).includes("auditor");
@@ -567,7 +574,7 @@ const canonicalAdministrativePost = (value = "") => {
     normalizeAuditAssignment(post.value) === normalized ||
     normalizeAuditAssignment(post.label) === normalized
   );
-  return option?.value || String(value);
+  return option?.value || "";
 };
 const assignmentSourceList = (source) => {
   if (!source) return [];
@@ -597,6 +604,17 @@ const normalizeAuditorAssignment = (assignment = {}, index = 0) => {
   const post = canonicalAdministrativePost(
     assignment.post || assignment.rolePost || assignment.administrativePost || assignment.assignment || "",
   );
+  const school = assignment.school || assignment.schoolName || "";
+  const explicitAuditCategory = normalizeOptionalAuditType(
+    assignment.auditCategory ||
+    assignment.auditType ||
+    assignment.category ||
+    assignment.forwardedAuditCategory ||
+    auditor.auditCategory ||
+    auditor.auditType ||
+    auditor.category ||
+    "",
+  );
   const submittedAt = assignment.submittedAt || assignment.reviewedAt || assignment.completedAt || "";
   const status = normalizeStatus(assignment.status || assignment.reviewStatus || (submittedAt ? "submitted" : "pending"));
   return {
@@ -605,9 +623,9 @@ const normalizeAuditorAssignment = (assignment = {}, index = 0) => {
     auditorName: assignment.auditorName || assignment.name || assignment.fullName || auditor.name || auditor.fullName || "-",
     auditorEmail: assignment.auditorEmail || assignment.email || assignment.username || auditor.email || auditor.username || "",
     auditorType: normalizeUserRole(assignment.auditorType || assignment.type || auditor.auditorType || auditor.auditorCategory || ""),
-    auditCategory: normalizeAuditType(assignment.auditCategory || assignment.category || "administrative"),
+    auditCategory: explicitAuditCategory || (post ? "administrative" : school ? "academic" : ""),
     post,
-    school: assignment.school || assignment.schoolName || "",
+    school,
     status,
     submittedAt,
     values: safeObjectValue(assignment.values || assignment.valuesData || assignment.reviewValues || assignment.reviewValuesData),
@@ -617,6 +635,21 @@ const normalizeAuditorAssignment = (assignment = {}, index = 0) => {
 const auditorAssignmentSubmitted = (assignment = {}) =>
   ["submitted", "completed", "auditor-completed", "approved"].includes(normalizeStatus(assignment.status)) ||
   Boolean(assignment.submittedAt);
+const auditorAssignmentBelongsToSubmission = (assignment = {}, submission = {}) => {
+  const submissionAuditType = normalizeOptionalAuditType(submission.auditType || submission.type);
+  if (!submissionAuditType) return true;
+
+  if (submissionAuditType === "administrative") {
+    return assignment.auditCategory !== "academic" && Boolean(canonicalAdministrativePost(assignment.post));
+  }
+
+  if (assignment.auditCategory) return assignment.auditCategory === submissionAuditType;
+
+  return Boolean(
+    assignment.school &&
+    (!submission.school || assignmentMatches(assignment.school, submission.school, schoolAliasesFor))
+  );
+};
 const normalizeAuditorAssignments = (submission = {}, values = {}) => {
   const progressSource = submission.auditorProgress;
   const progressHasAssignments = Array.isArray(progressSource) ||
@@ -629,7 +662,9 @@ const normalizeAuditorAssignments = (submission = {}, values = {}) => {
     (progressHasAssignments ? progressSource : null) ||
     submission.auditorReviews ||
     values[AUDITOR_ASSIGNMENT_STATUS_FIELD];
-  return assignmentSourceList(source).map(normalizeAuditorAssignment);
+  return assignmentSourceList(source)
+    .map(normalizeAuditorAssignment)
+    .filter((assignment) => auditorAssignmentBelongsToSubmission(assignment, submission));
 };
 const buildAuditorProgress = (assignments = []) => {
   const total = assignments.length;
@@ -3381,7 +3416,12 @@ const groupAuditorAssignmentsForDisplay = (assignments = []) => {
 };
 
 function AuditorProgressPanel({ submission, compact = false }) {
-  const progress = submission.auditorProgress || {};
+  const visibleAssignments = (submission.auditorAssignments || []).filter((assignment) =>
+    auditorAssignmentBelongsToSubmission(assignment, submission)
+  );
+  const progress = visibleAssignments.length || submission.auditorAssignments?.length
+    ? buildAuditorProgress(visibleAssignments)
+    : submission.auditorProgress || {};
   if (!progress.total) return null;
 
   const percentage = Math.round((progress.submitted / progress.total) * 100);
@@ -3411,9 +3451,9 @@ function AuditorProgressPanel({ submission, compact = false }) {
           ))}
         </div>
       )}
-      {!compact && Boolean(submission.auditorAssignments?.length) && (
+      {!compact && Boolean(visibleAssignments.length) && (
         <div style={styles.auditorAssignmentList}>
-          {groupAuditorAssignmentsForDisplay(submission.auditorAssignments).map((assignment) => {
+          {groupAuditorAssignmentsForDisplay(visibleAssignments).map((assignment) => {
             const reviewValues = safeObjectValue(assignment.values);
             const documents = uniqueAttachments(valueList(reviewValues.auditDocumentation).filter(isAttachmentValue));
             const displayPost = (assignment.displayPosts || [assignment.post || assignment.school])
