@@ -276,6 +276,10 @@ const normalizeAuditType = (value = "") => String(value).toLowerCase().includes(
 const normalizeStatus = (value = "submitted") => String(value).toLowerCase().replaceAll("_", "-");
 const backendStatusFor = (status) => status.toUpperCase().replaceAll("-", "_");
 const isAuditorRole = (role = "") => String(role).includes("auditor");
+const auditorTypeForReportCategory = (value = "") => {
+  const category = normalizeUserRole(value);
+  return ["internal", "external"].includes(category) ? category : "";
+};
 const ACADEMIC_PART_E_SECTION_ID = "part-e-observations";
 const ACADEMIC_PART_E_FIELD_IDS = ["auditObservations", "auditRecommendations", "auditDocumentation"];
 const auditorSectionNumberFor = (auditType) => auditType === "academic" ? "E" : "F";
@@ -1044,16 +1048,24 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
   const previousReports = useMemo(
     () => allSubmissions.filter(isApprovedReport).map((report) => {
       const reportId = String(report.id);
-      const hasSuccessor = allSubmissions.some((submission) =>
-        String(submission.parentSubmissionId || "") === reportId ||
-        String(submission.previousApprovedSubmissionId || "") === reportId ||
-        (
-          submission.id !== report.id &&
-          String(submission.rootSubmissionId || "") === String(report.rootSubmissionId || "") &&
-          Number(submission.version || 1) > Number(report.version || 1)
-        )
-      );
-      return { ...report, hasNextCycle: report.hasNextCycle || hasSuccessor };
+      const reportRootId = String(report.rootSubmissionId || report.id || "");
+      const reportCategory = String(report.reportCategory || "").toLowerCase();
+      const hasSuccessor = allSubmissions.some((submission) => {
+        if (submission.id === report.id || submission.auditType !== report.auditType) return false;
+
+        const submissionCategory = String(submission.reportCategory || "").toLowerCase();
+        const isExternalSuccessor = reportCategory !== "internal" || submissionCategory === "external";
+        const hasDirectLink =
+          String(submission.parentSubmissionId || "") === reportId ||
+          String(submission.previousApprovedSubmissionId || "") === reportId;
+        const hasSameRootNextVersion =
+          Boolean(reportRootId) &&
+          String(submission.rootSubmissionId || "") === reportRootId &&
+          Number(submission.version || 1) > Number(report.version || 1);
+
+        return isExternalSuccessor && (hasDirectLink || hasSameRootNextVersion);
+      });
+      return { ...report, hasNextCycle: hasSuccessor };
     }),
     [allSubmissions],
   );
@@ -1457,7 +1469,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
     }
 
     setForwardTarget(submission);
-    setForwardAuditorType(submission.forwardedAuditorType || "");
+    setForwardAuditorType(auditorTypeForReportCategory(submission.reportCategory) || submission.forwardedAuditorType || "");
     setError("");
 
     if (auditors.length) return;
@@ -1481,6 +1493,11 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
 
   const forwardToAuditors = async (auditorType, matchingAuditors = []) => {
     if (!forwardTarget?.id || !auditorType || !matchingAuditors.length) return;
+    const requiredAuditorType = auditorTypeForReportCategory(forwardTarget.reportCategory);
+    if (requiredAuditorType && auditorType !== requiredAuditorType) {
+      setError(`${titleCase(forwardTarget.reportCategory)} Audit can only be forwarded to ${requiredAuditorType} auditors.`);
+      return;
+    }
 
     setForwardingId(auditorType);
     setError("");
@@ -3606,6 +3623,11 @@ function ReturnToAuditorModal({ submission, message, onMessageChange, returning,
 
 function ForwardAuditorModal({ submission, auditors, loading, selectedType, onTypeChange, forwardingId, onForward, onCancel }) {
   const [selectedAuditorIds, setSelectedAuditorIds] = useState([]);
+  const requiredAuditorType = auditorTypeForReportCategory(submission.reportCategory);
+  const auditorTypes = [
+    { value: "internal", label: "Internal", detail: "Auditors from within the university" },
+    { value: "external", label: "External", detail: "Auditors from outside the university" },
+  ].filter((type) => !requiredAuditorType || type.value === requiredAuditorType);
   const matchingAuditors = selectedType
     ? auditors.filter((auditor) => auditor.auditorType === selectedType && matchesSubmissionAssignment(auditor, submission))
     : [];
@@ -3662,10 +3684,7 @@ function ForwardAuditorModal({ submission, auditors, loading, selectedType, onTy
             </div>
           </div>
           <div style={styles.forwardTypeRow}>
-            {[
-              { value: "internal", label: "Internal", detail: "Auditors from within the university" },
-              { value: "external", label: "External", detail: "Auditors from outside the university" },
-            ].map((type) => (
+            {auditorTypes.map((type) => (
               <button
                 key={type.value}
                 type="button"
@@ -3690,7 +3709,7 @@ function ForwardAuditorModal({ submission, auditors, loading, selectedType, onTy
           {!selectedType ? (
             <div style={styles.forwardEmptyState}>
               <span style={styles.forwardEmptyIcon}>1</span>
-              <strong>Select Internal or External</strong>
+              <strong>Select {requiredAuditorType ? titleCase(requiredAuditorType) : "Internal or External"}</strong>
               <small>Matching auditors will appear here after choosing the auditor type.</small>
             </div>
           ) : loading ? (
