@@ -229,6 +229,7 @@ export default function AdministrativeAuditDashboard() {
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [contributionApproved, setContributionApproved] = useState(false);
   const [workflow, setWorkflow] = useState(workflowFromDraft());
+  const [administrativeProgress, setAdministrativeProgress] = useState({});
   const [data, setData] = useState(buildInitialData);
 
   const activeModule = useMemo(
@@ -289,6 +290,7 @@ export default function AdministrativeAuditDashboard() {
         setHasExistingSubmission(draft.exists);
         setIsSubmitted(draft.isSubmitted);
         setWorkflow(workflowFromDraft(draft));
+        setAdministrativeProgress(draft.administrativeProgress || {});
         const contributionStatus = String(
           draft.administrativeProgress?.[currentStatusRole?.key] ||
           draft.administrativeProgress?.[userPost] ||
@@ -564,6 +566,7 @@ export default function AdministrativeAuditDashboard() {
       setContributionApproved(true);
       setIsSubmitted(updatedDraft.isSubmitted);
       setWorkflow(workflowFromDraft(updatedDraft));
+      setAdministrativeProgress(updatedDraft.administrativeProgress || {});
       setData((current) => ({
         ...current,
         fields: {
@@ -672,6 +675,7 @@ export default function AdministrativeAuditDashboard() {
               <SubmissionStatusPanel
                 cycleId={workflow.cycleId || academicYear}
                 storedSubmissionStatus={storedAdministrativeStatusFor(data.fields)}
+                administrativeProgress={administrativeProgress}
               />
             ) : (
               moduleBlocksFor(activeModule).map((block, index) => {
@@ -1600,7 +1604,27 @@ const styles = {
   },
 };
 
-function SubmissionStatusPanel({ cycleId, storedSubmissionStatus = {} }) {
+const submittedStatusValues = new Set(["submitted", "approved", "under-review", "auditor-completed"]);
+
+const progressInfoForRole = (administrativeProgress = {}, role = {}) => {
+  const progressValue = administrativeProgress[role.key] ?? administrativeProgress[role.post];
+  if (!progressValue) return {};
+
+  if (typeof progressValue === "object") {
+    const status = String(progressValue.status || progressValue.contributionStatus || "").toLowerCase().replaceAll("_", "-");
+    return {
+      submitted: Boolean(progressValue.submitted || progressValue.submittedAt || submittedStatusValues.has(status)),
+      submittedAt: progressValue.submittedAt || progressValue.date || progressValue.updatedAt || progressValue.createdAt || null,
+      name: progressValue.name || progressValue.submittedBy || progressValue.userName || null,
+      email: progressValue.email || progressValue.submittedByEmail || null,
+    };
+  }
+
+  const status = String(progressValue).toLowerCase().replaceAll("_", "-");
+  return { submitted: submittedStatusValues.has(status) };
+};
+
+function SubmissionStatusPanel({ cycleId, storedSubmissionStatus = {}, administrativeProgress = {} }) {
   const [statusMap, setStatusMap] = useState({
     registrar: { submitted: false, submittedAt: null, name: null, email: null },
     hr: { submitted: false, submittedAt: null, name: null, email: null },
@@ -1663,12 +1687,13 @@ function SubmissionStatusPanel({ cycleId, storedSubmissionStatus = {} }) {
         {ADMIN_STATUS_ROLES.map((r) => {
           const info = statusMap[r.key] || { submitted: false, submittedAt: null, name: null, email: null };
           const storedInfo = storedSubmissionStatus[r.key] || {};
+          const progressInfo = progressInfoForRole(administrativeProgress, r);
           const mergedInfo = {
             ...info,
-            submitted: info.submitted,
-            submittedAt: storedInfo.submittedAt || info.submittedAt,
-            name: storedInfo.name || info.name,
-            email: storedInfo.email || info.email,
+            submitted: Boolean(info.submitted || storedInfo.submitted || progressInfo.submitted),
+            submittedAt: storedInfo.submittedAt || info.submittedAt || progressInfo.submittedAt,
+            name: storedInfo.name || info.name || progressInfo.name,
+            email: storedInfo.email || info.email || progressInfo.email,
           };
           const formattedDate = formatSubmittedDateTime(mergedInfo.submittedAt);
 
