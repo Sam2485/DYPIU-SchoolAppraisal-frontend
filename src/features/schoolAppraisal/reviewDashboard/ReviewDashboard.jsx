@@ -359,14 +359,28 @@ const isAuditorCorrectionRequested = (submission = {}) =>
     submission.correctionRequestedForAuditor ||
     submission.requiresAuditorResubmission
   );
-const isAuditorCompleted = (submission = {}) =>
-  !["submitted", "under-review"].includes(submission.status) &&
-  !isAuditorCorrectionRequested(submission) &&
-  !(submission.auditorProgress?.total > 0 && !submission.auditorProgress.allSubmitted) &&
-  (
-    ["auditor-completed", "approved"].includes(submission.status) ||
-    Boolean(submission.auditorReviewedOn || submission.auditorReviewedBy || getAuditorSignOff(submission.values).date)
+const submittedAuditorAssignmentsForSubmission = (submission = {}) =>
+  (submission.auditorAssignments || []).filter((assignment) =>
+    auditorAssignmentBelongsToSubmission(assignment, submission)
   );
+const allAuditorAssignmentsSubmitted = (submission = {}) => {
+  const assignments = submittedAuditorAssignmentsForSubmission(submission);
+  return assignments.length > 0 && assignments.every(auditorAssignmentSubmitted);
+};
+const isAuditorCompleted = (submission = {}) => {
+  if (submission.status === "submitted" || isAuditorCorrectionRequested(submission)) return false;
+  if (["auditor-completed", "approved"].includes(submission.status)) return true;
+
+  const progress = submission.auditorProgress || {};
+  return Boolean(
+    submission.allAuditorsSubmitted ||
+    progress.allSubmitted ||
+    allAuditorAssignmentsSubmitted(submission) ||
+    submission.auditorReviewedOn ||
+    submission.auditorReviewedBy ||
+    getAuditorSignOff(submission.values).date
+  );
+};
 const responseList = (payload) => {
   const data = payload?.data ?? payload;
   if (Array.isArray(data)) return data;
@@ -1231,6 +1245,23 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
 
     try {
       const reviewedOn = new Date().toISOString();
+      const visibleAuditorAssignments = submittedAuditorAssignmentsForSubmission(submission);
+      const visibleAuditorProgress = buildAuditorProgress(visibleAuditorAssignments);
+      const shouldReconcileAuditorCompletion =
+        submission.status === "under-review" &&
+        visibleAuditorProgress.total > 0 &&
+        visibleAuditorProgress.allSubmitted;
+      if (shouldReconcileAuditorCompletion) {
+        await updateSubmissionById(submission.id, {
+          status: backendStatusFor("auditor-completed"),
+          auditorAssignments: submission.auditorAssignments || [],
+          auditorProgress: visibleAuditorProgress,
+          allAuditorsSubmitted: true,
+          allAssignedAuditorsSubmitted: true,
+          auditorReviewedOn: submission.auditorReviewedOn || reviewedOn,
+          auditorReviewedBy: submission.auditorReviewedBy || visibleAuditorAssignments.map((assignment) => assignment.auditorName).filter(Boolean).join(", "),
+        });
+      }
       const reviewer = { ...profile, role };
       const approvedVersion = reportVersionForCategory(reportCategory, submission.version);
       const baseSignedValues = withApproverSignOff(submission.values, reviewer, reviewedOn);
@@ -2465,6 +2496,7 @@ function FullFormReview({
   const [draftAttachments, setDraftAttachments] = useState(
     initialDraftAttachments
   );
+  const [reviewRemarks, setReviewRemarks] = useState(submission.remarks || "");
   const [activeSectionIndex, setActiveSectionIndex] = useState(0);
   const [reportMode, setReportMode] = useState(false);
   const activeSection = sections[activeSectionIndex] || sections[0];
@@ -2477,7 +2509,7 @@ function FullFormReview({
     hasSavedData: submission.hasSavedData,
   };
   const isLastSection = activeSectionIndex === sections.length - 1;
-  const hasRemarks = Boolean(submission.remarks.trim());
+  const hasRemarks = Boolean(reviewRemarks.trim());
   const goToSection = (sectionIndex) => {
     setActiveSectionIndex(sectionIndex);
     scrollPageToTop();
@@ -2719,8 +2751,11 @@ function FullFormReview({
                   Review Remarks
                   <textarea
                     className="audit-control"
-                    value={submission.remarks}
-                    onChange={(event) => onRemarksChange(event.target.value)}
+                    value={reviewRemarks}
+                    onChange={(event) => {
+                      setReviewRemarks(event.target.value);
+                      onRemarksChange(event.target.value);
+                    }}
                     placeholder="Write final approval remarks"
                     style={{ ...styles.remarksInput, minHeight: 120 }}
                   />
