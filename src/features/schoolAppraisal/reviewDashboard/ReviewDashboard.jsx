@@ -701,6 +701,7 @@ const auditorAssignmentMatchesProfile = (assignment = {}, submission = {}, profi
   const idMatches = userId && String(assignment.auditorId) === userId;
   const emailMatches = email && normalizeAuditAssignment(assignment.auditorEmail) === email;
   if (idMatches || emailMatches) return true;
+  if ((submission.auditorAssignments || []).length) return false;
 
   const profileType = normalizeUserRole(profile.auditorType || auditorTypeFromRole(profile.role));
   const assignmentType = normalizeUserRole(assignment.auditorType);
@@ -1837,6 +1838,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
               }
               auditorCorrectionMode={isAuditor && isAuditorCorrectionRequested(selectedSubmission)}
               showPreviousAuditorReference={isAuditor && profile.auditorType === "external"}
+              currentProfile={profile}
             />
           ) : visibleActiveView === "overview" ? (
             <OverviewPanel
@@ -2482,6 +2484,7 @@ function FullFormReview({
   auditorReviewReadOnly,
   auditorCorrectionMode,
   showPreviousAuditorReference,
+  currentProfile,
 }) {
   const sections = sectionsForAudit(submission.auditType);
   const previousInternalReport = (submission.versionHistory || [])
@@ -2507,7 +2510,7 @@ function FullFormReview({
     !auditorReviewReadOnly &&
     hasAcademicPartEValues(previousInternalReport?.values) &&
     academicPartEValuesMatch(submission.values, previousInternalReport.values);
-  const currentUserAssignments = auditorAssignmentsForCurrentUser(submission);
+  const currentUserAssignments = auditorAssignmentsForCurrentUser(submission, currentProfile);
   const currentAssignmentValues = currentUserAssignments
     .map((assignment) => safeObjectValue(assignment.values))
     .find(hasAcademicPartEValues);
