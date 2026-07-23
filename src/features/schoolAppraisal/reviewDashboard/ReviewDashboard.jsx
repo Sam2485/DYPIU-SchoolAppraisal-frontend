@@ -107,6 +107,8 @@ const statusLabels = {
   "under-review": "Under Review",
   "auditor-completed": "Auditor Completed",
   approved: "Approved",
+  "pending-contributor-submission": "With Editor",
+  "external-contributor-pending": "With Editor",
 };
 
 const statusStyles = {
@@ -428,6 +430,10 @@ const uniqueValues = (values) => [...new Set(values.filter(Boolean))];
 const isAdministrativeContributorStage = (submission = {}) =>
   submission.auditType === "administrative" &&
   contributorStageStatuses.has(normalizeStatus(submission.overallStatus || submission.status));
+const canForwardSubmissionToEditor = (submission = {}) =>
+  submission.auditType === "administrative" &&
+  !isApprovedReport(submission) &&
+  !isAdministrativeContributorStage(submission);
 const canForwardSubmissionToAuditor = (submission = {}) => {
   if (submission.canForwardToAuditor !== null && submission.canForwardToAuditor !== undefined) {
     return submission.canForwardToAuditor;
@@ -977,6 +983,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
   const [forwardTarget, setForwardTarget] = useState(null);
   const [forwardAuditorType, setForwardAuditorType] = useState("");
   const [forwardingId, setForwardingId] = useState("");
+  const [forwardingEditorId, setForwardingEditorId] = useState("");
   const [approvalTarget, setApprovalTarget] = useState(null);
   const [approvalCategory, setApprovalCategory] = useState("");
   const [correctionTarget, setCorrectionTarget] = useState(null);
@@ -1044,6 +1051,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
   const previousReports = useMemo(
     () => allSubmissions.filter(isApprovedReport).map((report) => {
       const reportId = String(report.id);
+      const reportRootId = String(report.rootSubmissionId || report.id || "");
       const hasSuccessor = allSubmissions.some((submission) =>
         String(submission.parentSubmissionId || "") === reportId ||
         String(submission.previousApprovedSubmissionId || "") === reportId ||
@@ -1052,11 +1060,11 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
           submission.auditType === report.auditType &&
           (submission.auditType === "academic"
             ? submission.school === report.school
-            : submission.administrativePost === report.administrativePost) &&
+            : Boolean(reportRootId) && String(submission.rootSubmissionId || "") === reportRootId) &&
           Number(submission.version || 1) > Number(report.version || 1)
         )
       );
-      return { ...report, hasNextCycle: report.hasNextCycle || hasSuccessor };
+      return { ...report, hasNextCycle: hasSuccessor };
     }),
     [allSubmissions],
   );
@@ -1361,6 +1369,74 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
       setError(getApiErrorMessage(correctionError, "Could not return this review to the auditor for correction."));
     } finally {
       setReviewingStatus("");
+    }
+  };
+
+  const forwardToAdministrativeEditors = async (submission) => {
+    if (!canForwardSubmissionToEditor(submission)) return;
+
+    const ok = window.confirm(
+      `Forward ${submission.school} back to the administrative editors? They can update and resubmit their sections.`,
+    );
+    if (!ok) return;
+
+    const editorStatus = String(submission.reportCategory || "").toLowerCase() === "external"
+      ? "external-contributor-pending"
+      : "pending-contributor-submission";
+    const forwardedOn = new Date().toISOString();
+    const payload = {
+      status: backendStatusFor(editorStatus),
+      overallStatus: backendStatusFor(editorStatus),
+      contributionStatus: backendStatusFor(editorStatus),
+      canEditContribution: true,
+      canForwardToAuditor: false,
+      allContributorsSubmitted: false,
+      allAdministrativeContributorsSubmitted: false,
+      forwardedToEditor: true,
+      editorForwardedBy: profile.name,
+      editorForwardedByRole: role,
+      editorForwardedOn: forwardedOn,
+      forwardedToAuditorId: "",
+      forwardedToAuditorName: "",
+      forwardedToAuditorEmail: "",
+      forwardedToAuditorIds: [],
+      forwardedToAuditorNames: [],
+      forwardedToAuditorEmails: [],
+      auditorAssignments: [],
+      auditorProgress: { total: 0, submitted: 0, pending: 0, allSubmitted: false, byPost: [] },
+      forwardedAuditorType: "",
+      forwardedAuditCategory: "",
+    };
+
+    setForwardingEditorId(submission.id);
+    setError("");
+    try {
+      await updateSubmissionById(submission.id, payload);
+      updateSubmission(submission.auditType, submission.id, {
+        status: editorStatus,
+        overallStatus: editorStatus,
+        contributionStatus: editorStatus,
+        canEditContribution: true,
+        canForwardToAuditor: false,
+        allContributorsSubmitted: false,
+        forwardedToEditor: true,
+        editorForwardedBy: profile.name,
+        editorForwardedOn: forwardedOn,
+        forwardedToAuditorId: "",
+        forwardedToAuditorName: "",
+        forwardedToAuditorEmail: "",
+        forwardedToAuditorIds: [],
+        forwardedToAuditorNames: [],
+        forwardedToAuditorEmails: [],
+        auditorAssignments: [],
+        auditorProgress: { total: 0, submitted: 0, pending: 0, allSubmitted: false, byPost: [] },
+        forwardedAuditorType: "",
+        forwardedAuditCategory: "",
+      });
+    } catch (editorError) {
+      setError(getApiErrorMessage(editorError, "Could not forward this submission back to the administrative editors."));
+    } finally {
+      setForwardingEditorId("");
     }
   };
 
@@ -1763,6 +1839,8 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
               onGroupChange={(group) => setActiveGroup((current) => ({ ...current, academic: group }))}
               onOpen={openSubmission}
               onForward={canManageUsers ? openForwardModal : null}
+              onForwardToEditor={null}
+              forwardingEditorId={forwardingEditorId}
               onDownload={!isAuditor ? handleDownloadAttachments : null}
               downloadingAttachmentsId={downloadingAttachmentsId}
               loading={loadingSubmissions}
@@ -1777,6 +1855,8 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
               onGroupChange={(group) => setActiveGroup((current) => ({ ...current, administrative: group }))}
               onOpen={openSubmission}
               onForward={canManageUsers ? openForwardModal : null}
+              onForwardToEditor={canManageUsers ? forwardToAdministrativeEditors : null}
+              forwardingEditorId={forwardingEditorId}
               onDownload={!isAuditor ? handleDownloadAttachments : null}
               downloadingAttachmentsId={downloadingAttachmentsId}
               loading={loadingSubmissions}
@@ -2004,7 +2084,19 @@ function SchoolProgressPanel({ schools, loading }) {
   );
 }
 
-function AuditReviewPanel({ auditType, submissions, activeGroup, onGroupChange, onOpen, onForward, onDownload, downloadingAttachmentsId, loading }) {
+function AuditReviewPanel({
+  auditType,
+  submissions,
+  activeGroup,
+  onGroupChange,
+  onOpen,
+  onForward,
+  onForwardToEditor,
+  forwardingEditorId,
+  onDownload,
+  downloadingAttachmentsId,
+  loading,
+}) {
   const filtered = activeGroup === "all" ? submissions : submissions.filter((submission) => submission.group === activeGroup);
   const counts = {
     all: submissions.length,
@@ -2051,6 +2143,8 @@ function AuditReviewPanel({ auditType, submissions, activeGroup, onGroupChange, 
             submission={submission}
             onOpen={() => onOpen(submission)}
             onForward={onForward ? () => onForward(submission) : null}
+            onForwardToEditor={onForwardToEditor ? () => onForwardToEditor(submission) : null}
+            forwardingToEditor={forwardingEditorId === submission.id}
             onDownload={onDownload ? () => onDownload(submission) : null}
             downloadingAttachments={downloadingAttachmentsId === submission.id}
           />
@@ -2260,6 +2354,8 @@ function SubmissionCard({
   submission,
   onOpen,
   onForward,
+  onForwardToEditor,
+  forwardingToEditor,
   onStartNextCycle,
   startingNextCycle,
   onDownload,
@@ -2316,13 +2412,25 @@ function SubmissionCard({
               : "Forward to Auditor"}
           </button>
         )}
+        {onForwardToEditor && canForwardSubmissionToEditor(submission) && (
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={onForwardToEditor}
+            disabled={forwardingToEditor}
+            aria-busy={forwardingToEditor}
+          >
+            {forwardingToEditor && <InlineSpinner label="Forwarding to editor" />}
+            {forwardingToEditor ? "Forwarding..." : "Forward to Editor"}
+          </button>
+        )}
         {onStartNextCycle && (
           <button type="button" className="btn btn-primary" onClick={onStartNextCycle} disabled={startingNextCycle} aria-busy={startingNextCycle}>
             {startingNextCycle && <InlineSpinner label="Starting next audit cycle" />}
             {startingNextCycle
               ? "Creating next cycle..."
               : submission.auditType === "administrative"
-                ? "Start External cycle"
+                ? "Start External Cycle"
                 : "Forward to External auditor"}
           </button>
         )}
