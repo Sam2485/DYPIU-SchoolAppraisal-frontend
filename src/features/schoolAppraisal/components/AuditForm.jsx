@@ -124,11 +124,13 @@ const assignmentForType = (assignments = [], auditorType = "") =>
 
 const buildAcademicPartEReview = (draft = {}, history = []) => {
   const status = normalizeStatus(draft.overallStatus || draft.status);
-  if (status !== "approved") {
+  const reportCategory = normalizeCategory(draft.reportCategory || draft.cycleType);
+  const isExternal = reportCategory === "external";
+
+  if (status !== "approved" && !isExternal) {
     return { isApproved: false };
   }
 
-  const reportCategory = normalizeCategory(draft.reportCategory || draft.cycleType);
   const assignments = Array.isArray(draft.auditorAssignments) ? draft.auditorAssignments : [];
   const internalAssignment = assignmentForType(assignments, "internal");
   const externalAssignment = assignmentForType(assignments, "external");
@@ -152,19 +154,22 @@ const buildAcademicPartEReview = (draft = {}, history = []) => {
     previousInternal?.values || {};
 
   const externalValues =
-    externalAssignment ? normalizedAssignmentValues(externalAssignment) :
-    reportCategory === "external" && currentHasPartE ? draft.values :
-    {};
+    status === "approved"
+      ? (externalAssignment ? normalizedAssignmentValues(externalAssignment) : (reportCategory === "external" && currentHasPartE ? draft.values : {}))
+      : {};
+
+  const iqacRemarks = status === "approved" ? (draft.remarks || "") : "";
+  const previousIqacRemarks = previousInternal?.remarks || "";
 
   return {
     isApproved: true,
     reportCategory,
     internalValues,
     externalValues,
-    iqacRemarks: draft.remarks || "",
-    previousIqacRemarks: previousInternal?.remarks || "",
+    iqacRemarks,
+    previousIqacRemarks,
     internalAuditor: internalAssignment ? assignmentAuditor(internalAssignment) : getAuditorSignOff(previousInternal || draft),
-    externalAuditor: externalAssignment ? assignmentAuditor(externalAssignment) : getAuditorSignOff(draft),
+    externalAuditor: status === "approved" ? (externalAssignment ? assignmentAuditor(externalAssignment) : getAuditorSignOff(draft)) : null,
   };
 };
 

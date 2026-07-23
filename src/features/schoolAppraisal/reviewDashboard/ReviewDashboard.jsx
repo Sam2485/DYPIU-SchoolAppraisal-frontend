@@ -1049,7 +1049,10 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
         String(submission.previousApprovedSubmissionId || "") === reportId ||
         (
           submission.id !== report.id &&
-          String(submission.rootSubmissionId || "") === String(report.rootSubmissionId || "") &&
+          submission.auditType === report.auditType &&
+          (submission.auditType === "academic"
+            ? submission.school === report.school
+            : submission.administrativePost === report.administrativePost) &&
           Number(submission.version || 1) > Number(report.version || 1)
         )
       );
