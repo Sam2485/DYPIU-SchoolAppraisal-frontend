@@ -286,7 +286,7 @@ export default function AuditForm({ schema, academicYear = schema.academicYear, 
           normalizeHistoryDraft(entry, initialValues, initialTables, index)
         );
 
-        if (auditType === "academic" && draft.id && normalizeStatus(draft.overallStatus || draft.status) === "approved") {
+        if (auditType === "academic" && draft.id) {
           try {
             const { data: snapshotsData } = await fetchSubmissionSnapshots(draft.id);
             historyEntries = [
