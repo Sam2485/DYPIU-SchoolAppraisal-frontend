@@ -1099,6 +1099,9 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
       const reportId = String(report.id);
       const reportRootId = String(report.rootSubmissionId || report.id || "");
       const reportCategory = String(report.reportCategory || "").toLowerCase();
+      const reportOwner = report.auditType === "academic"
+        ? report.school
+        : report.submittedByDesignation || report.school;
       const hasSuccessor = allSubmissions.some((submission) => {
         if (submission.id === report.id || submission.auditType !== report.auditType) return false;
 
@@ -1111,10 +1114,22 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
           Boolean(reportRootId) &&
           String(submission.rootSubmissionId || "") === reportRootId &&
           Number(submission.version || 1) > Number(report.version || 1);
+        const submissionOwner = submission.auditType === "academic"
+          ? submission.school
+          : submission.submittedByDesignation || submission.school;
+        const hasSameOwnerExternalCycle =
+          reportCategory === "internal" &&
+          submissionCategory === "external" &&
+          (
+            report.auditType === "administrative" ||
+            assignmentMatches(reportOwner, submissionOwner, schoolAliasesFor)
+          ) &&
+          compactAcademicYear(submission.auditCycle || "") === compactAcademicYear(report.auditCycle || "") &&
+          Number(submission.version || 1) >= Number(report.version || 1);
 
-        return isExternalSuccessor && (hasDirectLink || hasSameRootNextVersion);
+        return isExternalSuccessor && (hasDirectLink || hasSameRootNextVersion || hasSameOwnerExternalCycle);
       });
-      return { ...report, hasNextCycle: hasSuccessor };
+      return { ...report, hasNextCycle: Boolean(report.hasNextCycle || hasSuccessor) };
     }),
     [allSubmissions],
   );
@@ -1458,10 +1473,16 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
         previousApprovedSubmissionId: submission.id,
         nextVersion: Number(submission.version || 1) + 1,
       });
+      updateSubmission(submission.auditType, submission.id, { hasNextCycle: true });
       setActiveView(submission.auditType);
       setRefreshKey((current) => current + 1);
     } catch (cycleError) {
-      setError(getApiErrorMessage(cycleError, "Could not start the next audit cycle."));
+      const message = getApiErrorMessage(cycleError, "Could not start the next audit cycle.");
+      if (/next cycle already exists/i.test(message)) {
+        updateSubmission(submission.auditType, submission.id, { hasNextCycle: true });
+        setRefreshKey((current) => current + 1);
+      }
+      setError(message);
     } finally {
       setStartingNextCycleId("");
     }
