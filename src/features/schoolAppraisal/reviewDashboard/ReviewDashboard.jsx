@@ -1269,6 +1269,9 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
       if (shouldReconcileAuditorCompletion) {
         await updateSubmissionById(submission.id, {
           status: backendStatusFor("auditor-completed"),
+          submissionStatus: backendStatusFor("auditor-completed"),
+          overallStatus: backendStatusFor("auditor-completed"),
+          workflowStatus: backendStatusFor("auditor-completed"),
           auditorAssignments: submission.auditorAssignments || [],
           auditorProgress: visibleAuditorProgress,
           allAuditorsSubmitted: true,
@@ -1708,6 +1711,26 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
         responseSubmission.allAuditorsSubmitted ??
         responseSubmission.allAssignedAuditorsSubmitted
       ) ?? auditorProgress.allSubmitted;
+      if (allAuditorsSubmitted) {
+        await updateSubmissionById(submission.id, {
+          status: backendStatusFor("auditor-completed"),
+          submissionStatus: backendStatusFor("auditor-completed"),
+          overallStatus: backendStatusFor("auditor-completed"),
+          workflowStatus: backendStatusFor("auditor-completed"),
+          auditorAssignments,
+          auditorProgress,
+          allAuditorsSubmitted: true,
+          allAssignedAuditorsSubmitted: true,
+          auditorReviewedBy: profile.name,
+          auditorReviewedByDesignation: profile.designation,
+          auditorReviewedByRole: role,
+          auditorReviewedOn,
+          auditorReviewedByEmail: profile.email,
+          valuesData,
+          tablesData,
+          attachments,
+        });
+      }
       const nextStatus = normalizeStatus(
         responseSubmission.status ||
         responseSubmission.submissionStatus ||
