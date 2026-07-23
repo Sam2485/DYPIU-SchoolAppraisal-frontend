@@ -178,6 +178,8 @@ function AcademicPartEReviewPanel({ fields, review }) {
     );
   }
 
+  const hasExternalReview = hasPartEValues(review?.externalValues);
+
   return (
     <div style={styles.partEReviewPanel}>
       <PartEAuditorBlock
@@ -187,12 +189,25 @@ function AcademicPartEReviewPanel({ fields, review }) {
         auditor={review?.internalAuditor}
       />
       {review?.reportCategory === "external" && (
-        <PartEAuditorBlock
-          title="External Auditor Part E"
-          fields={fields}
-          values={review?.externalValues}
-          auditor={review?.externalAuditor}
-        />
+        hasExternalReview ? (
+          <PartEAuditorBlock
+            title="External Auditor Part E"
+            fields={fields}
+            values={review?.externalValues}
+            auditor={review?.externalAuditor}
+          />
+        ) : (
+          <section style={styles.partEReviewBlock}>
+            <div style={styles.partEReviewHeader}>
+              <h3 style={styles.partEReviewTitle}>External Auditor Part E</h3>
+            </div>
+            <div style={styles.pendingIqacCard}>
+              <div style={styles.pendingIqacMessage}>
+                Your form has not been reviewed by external.
+              </div>
+            </div>
+          </section>
+        )
       )}
       {review?.previousIqacRemarks && review?.reportCategory === "external" && (
         <section style={styles.partEReviewBlock}>
