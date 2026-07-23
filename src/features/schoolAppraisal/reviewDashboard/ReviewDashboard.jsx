@@ -574,7 +574,7 @@ const canonicalAdministrativePost = (value = "") => {
     normalizeAuditAssignment(post.value) === normalized ||
     normalizeAuditAssignment(post.label) === normalized
   );
-  return option?.value || String(value);
+  return option?.value || "";
 };
 const assignmentSourceList = (source) => {
   if (!source) return [];
@@ -638,11 +638,12 @@ const auditorAssignmentSubmitted = (assignment = {}) =>
 const auditorAssignmentBelongsToSubmission = (assignment = {}, submission = {}) => {
   const submissionAuditType = normalizeOptionalAuditType(submission.auditType || submission.type);
   if (!submissionAuditType) return true;
-  if (assignment.auditCategory) return assignment.auditCategory === submissionAuditType;
 
   if (submissionAuditType === "administrative") {
-    return Boolean(assignment.post);
+    return assignment.auditCategory !== "academic" && Boolean(canonicalAdministrativePost(assignment.post));
   }
+
+  if (assignment.auditCategory) return assignment.auditCategory === submissionAuditType;
 
   return Boolean(
     assignment.school &&
@@ -3415,7 +3416,12 @@ const groupAuditorAssignmentsForDisplay = (assignments = []) => {
 };
 
 function AuditorProgressPanel({ submission, compact = false }) {
-  const progress = submission.auditorProgress || {};
+  const visibleAssignments = (submission.auditorAssignments || []).filter((assignment) =>
+    auditorAssignmentBelongsToSubmission(assignment, submission)
+  );
+  const progress = visibleAssignments.length || submission.auditorAssignments?.length
+    ? buildAuditorProgress(visibleAssignments)
+    : submission.auditorProgress || {};
   if (!progress.total) return null;
 
   const percentage = Math.round((progress.submitted / progress.total) * 100);
@@ -3445,9 +3451,9 @@ function AuditorProgressPanel({ submission, compact = false }) {
           ))}
         </div>
       )}
-      {!compact && Boolean(submission.auditorAssignments?.length) && (
+      {!compact && Boolean(visibleAssignments.length) && (
         <div style={styles.auditorAssignmentList}>
-          {groupAuditorAssignmentsForDisplay(submission.auditorAssignments).map((assignment) => {
+          {groupAuditorAssignmentsForDisplay(visibleAssignments).map((assignment) => {
             const reviewValues = safeObjectValue(assignment.values);
             const documents = uniqueAttachments(valueList(reviewValues.auditDocumentation).filter(isAttachmentValue));
             const displayPost = (assignment.displayPosts || [assignment.post || assignment.school])
