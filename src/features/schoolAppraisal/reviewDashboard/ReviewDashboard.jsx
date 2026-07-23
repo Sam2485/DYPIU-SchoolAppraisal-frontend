@@ -3323,6 +3323,10 @@ const mergeAuditorReviewValues = (base = {}, next = {}) => {
   });
   return merged;
 };
+const auditorReviewDocumentation = (assignment = {}) => {
+  const values = safeObjectValue(assignment.values || assignment.valuesData || assignment.reviewValues || assignment.reviewValuesData);
+  return uniqueAttachments(valueList(values.auditDocumentation).filter(isAttachmentValue));
+};
 const groupAuditorAssignmentsForDisplay = (assignments = []) => {
   const groups = new Map();
 
@@ -3337,7 +3341,7 @@ const groupAuditorAssignmentsForDisplay = (assignments = []) => {
         ...assignment,
         displayPosts: posts,
         values,
-        attachments: uniqueAttachments(arrayValue(assignment.attachments)),
+        attachments: auditorReviewDocumentation(assignment),
         groupedAssignments: [assignment],
       });
       return;
@@ -3347,7 +3351,7 @@ const groupAuditorAssignmentsForDisplay = (assignments = []) => {
     existing.values = mergeAuditorReviewValues(existing.values, values);
     existing.attachments = uniqueAttachments([
       ...arrayValue(existing.attachments),
-      ...arrayValue(assignment.attachments),
+      ...auditorReviewDocumentation(assignment),
     ]);
     existing.groupedAssignments = [...existing.groupedAssignments, assignment];
     if (existing.groupedAssignments.every(auditorAssignmentSubmitted)) {
@@ -3397,10 +3401,7 @@ function AuditorProgressPanel({ submission, compact = false }) {
         <div style={styles.auditorAssignmentList}>
           {groupAuditorAssignmentsForDisplay(submission.auditorAssignments).map((assignment) => {
             const reviewValues = safeObjectValue(assignment.values);
-            const documents = uniqueAttachments([
-              ...arrayValue(assignment.attachments).filter(isAttachmentValue),
-              ...valueList(reviewValues.auditDocumentation).filter(isAttachmentValue),
-            ]);
+            const documents = uniqueAttachments(valueList(reviewValues.auditDocumentation).filter(isAttachmentValue));
             const displayPost = (assignment.displayPosts || [assignment.post || assignment.school])
               .map(auditorAssignmentLabel)
               .join(", ");
