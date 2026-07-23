@@ -2398,15 +2398,34 @@ function FullFormReview({
     hasAcademicPartEValues(previousInternalReport?.values) &&
     academicPartEValuesMatch(submission.values, previousInternalReport.values);
   const currentUserAssignments = auditorAssignmentsForCurrentUser(submission);
-  const currentAssignmentValues = currentUserAssignments
-    .map((assignment) => safeObjectValue(assignment.values))
-    .find(hasAcademicPartEValues);
-  const currentAssignmentAttachments = uniqueAttachments(
-    currentUserAssignments.flatMap((assignment) => [
-      ...arrayValue(assignment.attachments).filter(isAttachmentValue),
-      ...valueList(safeObjectValue(assignment.values).auditDocumentation).filter(isAttachmentValue),
-    ])
-  );
+  const isAdministrative = submission.auditType === "administrative";
+  let currentAssignmentValues;
+  let currentAssignmentAttachments;
+  if (isAdministrative) {
+    const activeAssignment = currentUserAssignments[0];
+    if (activeAssignment) {
+      const assignmentValues = safeObjectValue(activeAssignment.values);
+      currentAssignmentValues = {
+        auditObservations: assignmentValues.auditObservations !== undefined ? assignmentValues.auditObservations : "",
+        auditRecommendations: assignmentValues.auditRecommendations !== undefined ? assignmentValues.auditRecommendations : "",
+        auditDocumentation: assignmentValues.auditDocumentation !== undefined ? assignmentValues.auditDocumentation : "",
+      };
+      currentAssignmentAttachments = arrayValue(activeAssignment.attachments);
+    } else {
+      currentAssignmentValues = null;
+      currentAssignmentAttachments = null;
+    }
+  } else {
+    currentAssignmentValues = currentUserAssignments
+      .map((assignment) => safeObjectValue(assignment.values))
+      .find(hasAcademicPartEValues);
+    currentAssignmentAttachments = uniqueAttachments(
+      currentUserAssignments.flatMap((assignment) => [
+        ...arrayValue(assignment.attachments).filter(isAttachmentValue),
+        ...valueList(safeObjectValue(assignment.values).auditDocumentation).filter(isAttachmentValue),
+      ])
+    );
+  }
   const shouldClearFreshAuditorDraft =
     canEditAuditorSection &&
     !auditorCorrectionMode &&
