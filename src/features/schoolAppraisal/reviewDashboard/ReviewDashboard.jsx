@@ -371,6 +371,16 @@ const isAuditorCompleted = (submission = {}) => {
   if (submission.status === "submitted" || isAuditorCorrectionRequested(submission)) return false;
   if (["auditor-completed", "approved"].includes(submission.status)) return true;
 
+  if (submission.auditType === "administrative") {
+    const progress = submission.auditorProgress || {};
+    return Boolean(
+      submission.allAssignedAuditorsSubmitted ||
+      submission.allAuditorsSubmitted ||
+      progress.allSubmitted ||
+      allAuditorAssignmentsSubmitted(submission)
+    );
+  }
+
   const progress = submission.auditorProgress || {};
   return Boolean(
     submission.allAuditorsSubmitted ||
