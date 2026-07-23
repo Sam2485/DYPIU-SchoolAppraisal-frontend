@@ -124,14 +124,12 @@ const assignmentForType = (assignments = [], auditorType = "") =>
 
 const buildAcademicPartEReview = (draft = {}, history = []) => {
   const status = normalizeStatus(draft.overallStatus || draft.status);
-  if (status !== "approved") {
+  const reportCategory = normalizeCategory(draft.reportCategory || draft.cycleType);
+
+  if (reportCategory === "internal" && status !== "approved") {
     return { isApproved: false };
   }
 
-  const reportCategory = normalizeCategory(draft.reportCategory || draft.cycleType);
-  const assignments = Array.isArray(draft.auditorAssignments) ? draft.auditorAssignments : [];
-  const internalAssignment = assignmentForType(assignments, "internal");
-  const externalAssignment = assignmentForType(assignments, "external");
   const sortedHistory = [...history].sort((first, second) => Number(second.version || 0) - Number(first.version || 0));
   const previousInternal = sortedHistory.find((entry) =>
     (
@@ -142,29 +140,69 @@ const buildAcademicPartEReview = (draft = {}, history = []) => {
   );
 
   const currentHasPartE = hasAcademicPartEValues(draft.values);
+
+  if (reportCategory === "internal") {
+    const assignments = Array.isArray(draft.auditorAssignments) ? draft.auditorAssignments : [];
+    const internalAssignment = assignmentForType(assignments, "internal");
+    const internalValues =
+      internalAssignment ? normalizedAssignmentValues(internalAssignment) :
+      currentHasPartE ? draft.values :
+      {};
+
+    return {
+      isApproved: true,
+      reportCategory: "internal",
+      internalValues,
+      externalValues: {},
+      iqacRemarks: draft.remarks || "",
+      previousIqacRemarks: "",
+      internalAuditor: internalAssignment ? assignmentAuditor(internalAssignment) : getAuditorSignOff(draft),
+      externalAuditor: null,
+    };
+  }
+
+  // External cycle:
   const previousInternalAssignments = Array.isArray(previousInternal?.auditorAssignments) ? previousInternal.auditorAssignments : [];
   const previousInternalAssignment = assignmentForType(previousInternalAssignments, "internal");
 
   const internalValues =
-    internalAssignment ? normalizedAssignmentValues(internalAssignment) :
     previousInternalAssignment ? normalizedAssignmentValues(previousInternalAssignment) :
-    reportCategory === "internal" && currentHasPartE ? draft.values :
     previousInternal?.values || {};
 
-  const externalValues =
-    externalAssignment ? normalizedAssignmentValues(externalAssignment) :
-    reportCategory === "external" && currentHasPartE ? draft.values :
-    {};
+  const internalAuditor = previousInternalAssignment ? assignmentAuditor(previousInternalAssignment) : getAuditorSignOff(previousInternal);
+  const previousIqacRemarks = previousInternal?.remarks || "";
 
+  if (status === "approved") {
+    const assignments = Array.isArray(draft.auditorAssignments) ? draft.auditorAssignments : [];
+    const externalAssignment = assignmentForType(assignments, "external");
+
+    const externalValues =
+      externalAssignment ? normalizedAssignmentValues(externalAssignment) :
+      currentHasPartE ? draft.values :
+      {};
+
+    return {
+      isApproved: true,
+      reportCategory: "external",
+      internalValues,
+      externalValues,
+      iqacRemarks: draft.remarks || "",
+      previousIqacRemarks,
+      internalAuditor,
+      externalAuditor: externalAssignment ? assignmentAuditor(externalAssignment) : getAuditorSignOff(draft),
+    };
+  }
+
+  // External cycle, but not approved yet (e.g. draft, under-review)
   return {
     isApproved: true,
-    reportCategory,
+    reportCategory: "external",
     internalValues,
-    externalValues,
-    iqacRemarks: draft.remarks || "",
-    previousIqacRemarks: previousInternal?.remarks || "",
-    internalAuditor: internalAssignment ? assignmentAuditor(internalAssignment) : getAuditorSignOff(previousInternal || draft),
-    externalAuditor: externalAssignment ? assignmentAuditor(externalAssignment) : getAuditorSignOff(draft),
+    externalValues: {},
+    iqacRemarks: "",
+    previousIqacRemarks,
+    internalAuditor,
+    externalAuditor: null,
   };
 };
 
