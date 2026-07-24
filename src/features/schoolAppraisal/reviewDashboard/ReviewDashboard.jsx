@@ -591,6 +591,31 @@ const arrayValue = (value) => {
   if (typeof value === "object") return [value];
   return [];
 };
+const academicSchoolValueFor = (value) => {
+  if (!value) return "";
+  if (typeof value === "object") {
+    return value.code || value.schoolCode || value.school || value.schoolName || value.name || "";
+  }
+  return value;
+};
+const academicSchoolsFor = (user = {}) => {
+  const rawSchools = [
+    user.schools,
+    user.assignedSchools,
+    user.academicSchools,
+    user.schoolCodes,
+    user.schoolIds,
+    user.school,
+    user.schoolName,
+    user.assignment,
+  ].flatMap(valueList);
+  return uniqueValues(
+    rawSchools
+      .map(academicSchoolValueFor)
+      .map((school) => canonicalSchoolCode(school) || school)
+      .filter(Boolean)
+  );
+};
 const canonicalAdministrativePost = (value = "") => {
   const normalized = normalizeAuditAssignment(value);
   if (!normalized) return "";
@@ -628,7 +653,8 @@ const normalizeAuditorAssignment = (assignment = {}, index = 0) => {
   const post = canonicalAdministrativePost(
     assignment.post || assignment.rolePost || assignment.administrativePost || assignment.assignment || "",
   );
-  const school = assignment.school || assignment.schoolName || "";
+  const assignmentSchools = academicSchoolsFor(assignment);
+  const school = canonicalSchoolCode(assignment.school || assignment.schoolName || assignment.schoolCode) || assignmentSchools[0] || "";
   const explicitAuditCategory = normalizeOptionalAuditType(
     assignment.auditCategory ||
     assignment.auditType ||
@@ -669,9 +695,9 @@ const auditorAssignmentBelongsToSubmission = (assignment = {}, submission = {}) 
 
   if (assignment.auditCategory) return assignment.auditCategory === submissionAuditType;
 
-  return Boolean(
-    assignment.school &&
-    (!submission.school || assignmentMatches(assignment.school, submission.school, schoolAliasesFor))
+  const assignmentSchools = academicSchoolsFor(assignment).length ? academicSchoolsFor(assignment) : [assignment.school].filter(Boolean);
+  return assignmentSchools.some((school) =>
+    school && (!submission.school || assignmentMatches(school, submission.school, schoolAliasesFor))
   );
 };
 const normalizeAuditorAssignments = (submission = {}, values = {}) => {
@@ -718,7 +744,13 @@ const auditorAssignmentMatchesProfile = (assignment = {}, submission = {}, profi
   if (assignmentType && profileType && assignmentType !== profileType) return false;
 
   if (submission.auditType === "academic") {
-    return assignmentMatches(profile.school, assignment.school || submission.school, schoolAliasesFor);
+    const profileSchools = academicSchoolsFor(profile);
+    const assignmentSchools = academicSchoolsFor(assignment).length
+      ? academicSchoolsFor(assignment)
+      : [assignment.school || submission.school].filter(Boolean);
+    return profileSchools.some((profileSchool) =>
+      assignmentSchools.some((assignmentSchool) => assignmentMatches(profileSchool, assignmentSchool, schoolAliasesFor))
+    );
   }
 
   const profilePosts = administrativePostsFor(profile);
@@ -752,14 +784,15 @@ const auditorPostsForCurrentSubmission = (submission = {}, profile = {}) => {
 };
 const buildAuditorAssignmentsForForwarding = (submission = {}, auditorType = "", matchingAuditors = []) => {
   if (submission.auditType === "academic") {
+    const school = canonicalSchoolCode(submission.school) || submission.school;
     return matchingAuditors.map((auditor, index) => ({
-      key: `${auditor.id}-${submission.school || "school"}-${index}`,
+      key: `${auditor.id}-${school || "school"}-${auditorType}-${index}`,
       auditorId: auditor.id,
       auditorName: auditor.name,
       auditorEmail: auditor.email,
       auditorType,
       auditCategory: "academic",
-      school: submission.school,
+      school,
       post: "",
       status: "pending",
       submittedAt: null,
@@ -808,10 +841,11 @@ const normalizeAuditor = (user = {}, index = 0) => {
     accountType,
     auditorType,
     category,
-    school: user.school || user.schoolName || "",
+    schools: academicSchoolsFor(user),
+    school: academicSchoolsFor(user)[0] || user.school || user.schoolName || "",
     administrativePosts,
     assignment: category === "academic"
-      ? (user.school || user.schoolName || "")
+      ? (academicSchoolsFor(user).length ? academicSchoolsFor(user).join(", ") : (user.school || user.schoolName || ""))
       : administrativePosts.length
         ? administrativePosts.map((post) => ADMINISTRATIVE_POSTS.find((option) => option.value === post)?.label || post).join(", ")
         : (designation || ""),
@@ -821,7 +855,9 @@ const normalizeAuditor = (user = {}, index = 0) => {
 const matchesSubmissionAssignment = (auditor, submission) => {
   if (auditor.accountType !== "auditor" || auditor.category !== submission.auditType) return false;
   if (submission.auditType === "academic") {
-    return assignmentMatches(auditor.school || auditor.assignment, submission.school, schoolAliasesFor);
+    return academicSchoolsFor(auditor).some((school) =>
+      assignmentMatches(school, submission.school, schoolAliasesFor)
+    );
   }
 
   const auditorPosts = administrativePostsFor(auditor);
@@ -850,7 +886,9 @@ const matchesAuditorResponsibility = (submission, profile) => {
   if (forwardedType && auditorType && forwardedType !== auditorType) return false;
 
   if (submission.auditType === "academic") {
-    return assignmentMatches(profile.school, submission.school, schoolAliasesFor);
+    return academicSchoolsFor(profile).some((school) =>
+      assignmentMatches(school, submission.school, schoolAliasesFor)
+    );
   }
 
   const auditorPosts = administrativePostsFor(profile);
@@ -869,6 +907,10 @@ const matchesAuditorSession = (submission, profile) => {
   const userId = sessionStorage.getItem("userId") || "";
   const email = normalizeAuditAssignment(profile.email || sessionStorage.getItem("email") || sessionStorage.getItem("username") || "");
   const auditorType = normalizeUserRole(profile.auditorType || auditorTypeFromRole(profile.role));
+  const explicitAssignments = submission.auditorAssignments || [];
+  if (explicitAssignments.length) {
+    return auditorAssignmentsForCurrentUser(submission, profile).length > 0;
+  }
   const forwardedId = String(submission.forwardedToAuditorId || "");
   const forwardedEmail = normalizeAuditAssignment(submission.forwardedToAuditorEmail || "");
   const forwardedIds = valueList(submission.forwardedToAuditorIds).map(String);
@@ -2458,8 +2500,8 @@ function SubmissionCard({
             {startingNextCycle
               ? "Creating next cycle..."
               : submission.auditType === "administrative"
-                ? "Start External cycle"
-                : "Forward to External auditor"}
+                ? "Start External Cycle"
+                : "Start External Cycle"}
           </button>
         )}
         {onDownload && (
