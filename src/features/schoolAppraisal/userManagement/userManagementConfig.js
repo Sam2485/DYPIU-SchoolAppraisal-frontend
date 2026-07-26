@@ -12,6 +12,24 @@ export const SCHOOL_OPTIONS = [
 const normalizeSchoolValue = (value = "") =>
   String(value).trim().toLowerCase().replace(/[^a-z0-9]/g, "");
 
+const uniqueValues = (values) => [...new Set(values.filter(Boolean))];
+
+const rawListValue = (value) => {
+  if (Array.isArray(value)) return value.flatMap(rawListValue);
+  if (!value) return [];
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed.flatMap(rawListValue);
+      if (parsed && typeof parsed === "object") return [parsed];
+    } catch {
+      return value.split(",").map((item) => item.trim()).filter(Boolean);
+    }
+  }
+  if (typeof value === "object") return [value];
+  return [value];
+};
+
 export const canonicalSchoolCode = (value = "") => {
   const normalized = normalizeSchoolValue(value);
   const school = SCHOOL_OPTIONS.find((option) =>
@@ -20,6 +38,72 @@ export const canonicalSchoolCode = (value = "") => {
   );
 
   return school?.code.toUpperCase() || "";
+};
+
+export const normalizeAcademicSchoolCodes = (value) =>
+  uniqueValues(
+    rawListValue(value)
+      .map((school) => {
+        if (school && typeof school === "object") {
+          return canonicalSchoolCode(school.code || school.schoolCode || school.school || school.schoolName || school.name);
+        }
+        return canonicalSchoolCode(school);
+      })
+      .filter(Boolean)
+  );
+
+const ACADEMIC_AUDITOR_SCHOOLS_STORAGE_KEY = "schoolAppraisal.academicAuditorSchools";
+
+const storageKeysForUser = (user = {}) =>
+  uniqueValues([
+    user.id,
+    user.userId,
+    user.email,
+    user.username,
+  ].map((value) => String(value || "").trim().toLowerCase()));
+
+const readStoredAcademicAuditorSchools = () => {
+  try {
+    return JSON.parse(globalThis.localStorage?.getItem(ACADEMIC_AUDITOR_SCHOOLS_STORAGE_KEY) || "{}");
+  } catch {
+    return {};
+  }
+};
+
+const writeStoredAcademicAuditorSchools = (value) => {
+  try {
+    globalThis.localStorage?.setItem(ACADEMIC_AUDITOR_SCHOOLS_STORAGE_KEY, JSON.stringify(value));
+  } catch {
+    // Storage is an enhancement; API data remains the source of truth.
+  }
+};
+
+export const getStoredAcademicAuditorSchools = (user = {}) => {
+  const stored = readStoredAcademicAuditorSchools();
+  const key = storageKeysForUser(user).find((item) => stored[item]);
+  return key ? normalizeAcademicSchoolCodes(stored[key]) : [];
+};
+
+export const rememberAcademicAuditorSchools = (user = {}, schools = []) => {
+  const keys = storageKeysForUser(user);
+  if (!keys.length) return;
+
+  const stored = readStoredAcademicAuditorSchools();
+  const normalizedSchools = normalizeAcademicSchoolCodes(schools);
+  keys.forEach((key) => {
+    if (normalizedSchools.length) stored[key] = normalizedSchools;
+    else delete stored[key];
+  });
+  writeStoredAcademicAuditorSchools(stored);
+};
+
+export const forgetAcademicAuditorSchools = (user = {}) => {
+  const keys = storageKeysForUser(user);
+  if (!keys.length) return;
+
+  const stored = readStoredAcademicAuditorSchools();
+  keys.forEach((key) => delete stored[key]);
+  writeStoredAcademicAuditorSchools(stored);
 };
 
 export const schoolGroupFor = (value = "") => {

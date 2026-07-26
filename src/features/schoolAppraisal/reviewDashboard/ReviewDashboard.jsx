@@ -30,7 +30,14 @@ import AdministrativeReportPanel from "../administrativeAudit/AdministrativeRepo
 import AdministrativePartE from "../administrativeAudit/AdministrativePartE";
 import { academicAudit2025Schema } from "../formSchemas";
 import UserManagementPanel from "../userManagement/UserManagementPanel";
-import { ADMINISTRATIVE_POSTS, SCHOOL_OPTIONS, schoolGroupFor, canonicalSchoolCode } from "../userManagement/userManagementConfig";
+import {
+  ADMINISTRATIVE_POSTS,
+  SCHOOL_OPTIONS,
+  schoolGroupFor,
+  canonicalSchoolCode,
+  getStoredAcademicAuditorSchools,
+  normalizeAcademicSchoolCodes,
+} from "../userManagement/userManagementConfig";
 import BackupRestorePanel from "./BackupRestorePanel";
 import { formatDateDDMMYYYY } from "../../../utils/dateFormat";
 import { getAttachmentUrl } from "../../../utils/attachment";
@@ -382,10 +389,20 @@ const isAuditorCompleted = (submission = {}) => {
   }
 
   const progress = submission.auditorProgress || {};
+  const assignments = submittedAuditorAssignmentsForSubmission(submission);
+  const hasAssignmentProgress = assignments.length > 0 || Number(progress.total || 0) > 0;
+  if (hasAssignmentProgress) {
+    return Boolean(
+      submission.allAssignedAuditorsSubmitted ||
+      submission.allAuditorsSubmitted ||
+      progress.allSubmitted ||
+      allAuditorAssignmentsSubmitted(submission)
+    );
+  }
+
   return Boolean(
     submission.allAuditorsSubmitted ||
     progress.allSubmitted ||
-    allAuditorAssignmentsSubmitted(submission) ||
     submission.auditorReviewedOn ||
     submission.auditorReviewedBy ||
     getAuditorSignOff(submission.values).date
@@ -599,6 +616,9 @@ const academicSchoolValueFor = (value) => {
   return value;
 };
 const academicSchoolsFor = (user = {}) => {
+  const storedSchools = getStoredAcademicAuditorSchools(user);
+  if (storedSchools.length) return storedSchools;
+
   const rawSchools = [
     user.schools,
     user.assignedSchools,
@@ -608,11 +628,11 @@ const academicSchoolsFor = (user = {}) => {
     user.school,
     user.schoolName,
     user.assignment,
-  ].flatMap(valueList);
+  ].flatMap((value) => normalizeAcademicSchoolCodes(value).length ? normalizeAcademicSchoolCodes(value) : valueList(value));
   return uniqueValues(
     rawSchools
       .map(academicSchoolValueFor)
-      .map((school) => canonicalSchoolCode(school) || school)
+      .flatMap((school) => normalizeAcademicSchoolCodes(school))
       .filter(Boolean)
   );
 };
@@ -1129,8 +1149,12 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
       return auditItems;
     }
 
-    return canManageUsers ? [...REVIEW_NAV_ITEMS, USER_MANAGEMENT_NAV_ITEM] : REVIEW_NAV_ITEMS;
-  }, [canManageUsers, isAuditor, profile.category]);
+    return REVIEW_NAV_ITEMS;
+  }, [isAuditor, profile.category]);
+  const pinnedNavigationItems = useMemo(() => {
+    if (isAuditor || !canManageUsers) return [];
+    return [USER_MANAGEMENT_NAV_ITEM];
+  }, [canManageUsers, isAuditor]);
   const standaloneNavigationItems = useMemo(() => {
     if (isAuditor) return [];
     const items = [];
@@ -1826,6 +1850,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
           roleText={roleConfig.roleText}
           academicYear={academicYear}
           items={navigationItems}
+          pinnedItems={pinnedNavigationItems}
           standaloneItems={standaloneNavigationItems}
           activeId={visibleActiveView}
           onChange={(viewId) => {
@@ -1859,7 +1884,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
 
           {selectedSubmission ? (
             <FullFormReview
-              key={selectedSubmission.id}
+              key={`${selectedSubmission.id}-${profile.id || profile.email || profile.auditorRole || role}`}
               submission={selectedSubmission}
               onBack={() => setSelectedSubmission(null)}
               onRemarksChange={(remarks) => updateSubmission(selectedSubmission.auditType, selectedSubmission.id, { remarks })}
@@ -2302,10 +2327,10 @@ function PreviousReportsPanel({
 
   return (
     <section style={styles.panel}>
-      <div style={styles.pageTitleRow}>
-        <div style={styles.blueHeading}>
+      <div style={styles.previousReportsHeader}>
+        <div style={styles.previousReportsHeading}>
           <h2 style={styles.sectionTitle}>Previous Reports</h2>
-          <p style={styles.progressIntro}>Approved audit versions are preserved here as immutable historical records.</p>
+          <p style={styles.previousReportsIntro}>Approved audit versions are preserved here as immutable historical records.</p>
         </div>
         <div style={styles.pageTitleActions}>
           <label style={styles.yearFilter}>
@@ -2787,7 +2812,9 @@ function FullFormReview({
         onFileUpload={handleAuditorFileUpload}
         onFileDelete={handleAuditorFileDelete}
         auditorAssignments={submission.auditorAssignments || []}
+        currentAuditorAssignments={currentUserAssignments}
         previousInternalPartEValues={previousInternalPartE?.values}
+        previousInternalIqacRemarks={previousInternalPartE?.remarks}
         previousInternalPartEMeta={
           previousInternalPartE
             ? `${titleCase(previousInternalPartE.reportCategory || "internal")} Audit - ${previousInternalPartE.auditCycle} - V${previousInternalPartE.version}`
@@ -2938,6 +2965,12 @@ function PreviousAuditorReference({ auditType, history }) {
           Read-only reference from {previousReview.auditorReviewedBy || "the previous auditor"}.
           Current-cycle observations are stored separately.
         </p>
+        {previousReview.remarks && (
+          <div style={styles.partEReferenceBlock}>
+            <h4 style={styles.partEReferenceTitle}>IQAC Internal Audit Review Remarks</h4>
+            <p style={styles.reviewText}>{previousReview.remarks}</p>
+          </div>
+        )}
         <SubmittedFormViewer
           sections={sections}
           formData={{
@@ -2985,12 +3018,29 @@ function SubmittedFormViewer({
   onFileUpload,
   onFileDelete,
   auditorAssignments = [],
+  currentAuditorAssignments = [],
   previousInternalPartEValues,
+  previousInternalIqacRemarks = "",
   previousInternalPartEMeta = "",
 }) {
   const activeSection = sections[activeSectionIndex] || sections[0];
   const activeSectionIsAuditorOwned = activeSection ? isAuditorSection(activeSection, auditType) : false;
   const submittedAuditorAssignments = auditorAssignments.filter(auditorAssignmentSubmitted);
+  const currentAssignmentKeys = new Set(currentAuditorAssignments.map((assignment) => assignment.key).filter(Boolean));
+  const currentAssignmentIds = new Set(currentAuditorAssignments.map((assignment) => String(assignment.auditorId || "")).filter(Boolean));
+  const currentAssignmentEmails = new Set(
+    currentAuditorAssignments
+      .map((assignment) => normalizeAuditAssignment(assignment.auditorEmail || assignment.email || ""))
+      .filter(Boolean)
+  );
+  const submittedPeerAuditorAssignments = submittedAuditorAssignments.filter((assignment) => {
+    const assignmentEmail = normalizeAuditAssignment(assignment.auditorEmail || assignment.email || "");
+    return !(
+      (assignment.key && currentAssignmentKeys.has(assignment.key)) ||
+      (assignment.auditorId && currentAssignmentIds.has(String(assignment.auditorId))) ||
+      (assignmentEmail && currentAssignmentEmails.has(assignmentEmail))
+    );
+  });
   const showPreviousInternalPartE =
     auditType === "academic" &&
     activeSection?.id === ACADEMIC_PART_E_SECTION_ID &&
@@ -3003,6 +3053,10 @@ function SubmittedFormViewer({
     activeSectionIsAuditorOwned &&
     !editableSection &&
     submittedAuditorAssignments.length > 0;
+  const showSubmittedPeerAuditorReviews =
+    activeSectionIsAuditorOwned &&
+    editableSection &&
+    submittedPeerAuditorAssignments.length > 0;
 
   return (
     <div style={styles.formViewer}>
@@ -3048,6 +3102,21 @@ function SubmittedFormViewer({
                   values={formData.values}
                 />
               );
+              const currentFieldsWithReferences = (
+                <div style={styles.partEComparison}>
+                  {showSubmittedPeerAuditorReviews && (
+                    <div style={styles.partEReferenceBlock}>
+                      <h4 style={styles.partEReferenceTitle}>Submitted External Auditor Reviews</h4>
+                      <AuditorAssignmentReviewGrid
+                        fields={block.fields}
+                        assignments={submittedPeerAuditorAssignments}
+                        fallbackAuditorType="external"
+                      />
+                    </div>
+                  )}
+                  {currentFields}
+                </div>
+              );
 
               if (showPreviousInternalPartE) {
                 return (
@@ -3058,10 +3127,16 @@ function SubmittedFormViewer({
                         {previousInternalPartEMeta && <span style={styles.partEReferenceMeta}>{previousInternalPartEMeta}</span>}
                       </div>
                       <ReadOnlyFieldGrid fields={block.fields} values={previousInternalPartEValues} />
+                      {previousInternalIqacRemarks && (
+                        <div>
+                          <h4 style={styles.partEReferenceTitle}>IQAC Internal Audit Review Remarks</h4>
+                          <p style={styles.reviewText}>{previousInternalIqacRemarks}</p>
+                        </div>
+                      )}
                     </div>
                     <div style={styles.partECurrentBlock}>
                       <h4 style={styles.partEReferenceTitle}>External Auditor Part E - Current External Audit</h4>
-                      {currentFields}
+                      {currentFieldsWithReferences}
                     </div>
                   </div>
                 );
@@ -3087,7 +3162,7 @@ function SubmittedFormViewer({
                 );
               }
 
-              return currentFields;
+              return showSubmittedPeerAuditorReviews ? currentFieldsWithReferences : currentFields;
             }
 
             if (block.type === "text") {
@@ -4184,6 +4259,27 @@ const styles = {
     flexWrap: "wrap",
     gap: 10,
   },
+  previousReportsHeader: {
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    flexWrap: "wrap",
+    gap: "18px 24px",
+    paddingBottom: 24,
+    borderBottom: "1px solid #edf1f6",
+  },
+  previousReportsHeading: {
+    minWidth: 260,
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+  },
+  previousReportsIntro: {
+    margin: 0,
+    color: "#64748b",
+    fontSize: 12.5,
+    lineHeight: 1.45,
+  },
   yearFilter: {
     display: "flex",
     flexDirection: "column",
@@ -4408,14 +4504,13 @@ const styles = {
   previousReportGroups: {
     display: "flex",
     flexDirection: "column",
-    gap: 28,
+    gap: 24,
   },
   previousReportGroup: {
     display: "flex",
     flexDirection: "column",
     gap: 18,
-    padding: "22px 0 6px",
-    borderTop: "1px solid #dbe3ef",
+    padding: "2px 0 6px",
   },
   previousReportSectionTitleRow: {
     display: "flex",

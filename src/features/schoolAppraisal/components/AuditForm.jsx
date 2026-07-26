@@ -116,11 +116,16 @@ const assignmentAuditor = (assignment = {}) => ({
   date: assignment.submittedAt || assignment.auditorReviewedOn || "",
 });
 
-const assignmentForType = (assignments = [], auditorType = "") =>
-  assignments.find((assignment) =>
+const assignmentsForType = (assignments = [], auditorType = "") =>
+  assignments.filter((assignment) =>
     normalizeCategory(assignment.auditorType || assignment.forwardedAuditorType || assignment.type).includes(auditorType) &&
     hasAcademicPartEValues(normalizedAssignmentValues(assignment))
   );
+const latestSubmittedAssignment = (assignments = []) =>
+  [...assignments].sort((first, second) =>
+    new Date(second.submittedAt || second.auditorReviewedOn || 0) -
+    new Date(first.submittedAt || first.auditorReviewedOn || 0)
+  )[0];
 
 const buildAcademicPartEReview = (draft = {}, history = []) => {
   const status = normalizeStatus(draft.overallStatus || draft.status);
@@ -143,7 +148,8 @@ const buildAcademicPartEReview = (draft = {}, history = []) => {
 
   if (reportCategory === "internal") {
     const assignments = Array.isArray(draft.auditorAssignments) ? draft.auditorAssignments : [];
-    const internalAssignment = assignmentForType(assignments, "internal");
+    const internalAssignments = assignmentsForType(assignments, "internal");
+    const internalAssignment = latestSubmittedAssignment(internalAssignments);
     const internalValues =
       internalAssignment ? normalizedAssignmentValues(internalAssignment) :
       currentHasPartE ? draft.values :
@@ -158,12 +164,14 @@ const buildAcademicPartEReview = (draft = {}, history = []) => {
       previousIqacRemarks: "",
       internalAuditor: internalAssignment ? assignmentAuditor(internalAssignment) : getAuditorSignOff(draft),
       externalAuditor: null,
+      auditorAssignments: internalAssignments,
     };
   }
 
   // External cycle:
   const previousInternalAssignments = Array.isArray(previousInternal?.auditorAssignments) ? previousInternal.auditorAssignments : [];
-  const previousInternalAssignment = assignmentForType(previousInternalAssignments, "internal");
+  const submittedPreviousInternalAssignments = assignmentsForType(previousInternalAssignments, "internal");
+  const previousInternalAssignment = latestSubmittedAssignment(submittedPreviousInternalAssignments);
 
   const internalValues =
     previousInternalAssignment ? normalizedAssignmentValues(previousInternalAssignment) :
@@ -174,7 +182,8 @@ const buildAcademicPartEReview = (draft = {}, history = []) => {
 
   if (status === "approved") {
     const assignments = Array.isArray(draft.auditorAssignments) ? draft.auditorAssignments : [];
-    const externalAssignment = assignmentForType(assignments, "external");
+    const externalAssignments = assignmentsForType(assignments, "external");
+    const externalAssignment = latestSubmittedAssignment(externalAssignments);
 
     const externalValues =
       externalAssignment ? normalizedAssignmentValues(externalAssignment) :
@@ -190,6 +199,8 @@ const buildAcademicPartEReview = (draft = {}, history = []) => {
       previousIqacRemarks,
       internalAuditor,
       externalAuditor: externalAssignment ? assignmentAuditor(externalAssignment) : getAuditorSignOff(draft),
+      auditorAssignments: externalAssignments,
+      previousInternalAssignments: submittedPreviousInternalAssignments,
     };
   }
 
@@ -203,6 +214,8 @@ const buildAcademicPartEReview = (draft = {}, history = []) => {
     previousIqacRemarks,
     internalAuditor,
     externalAuditor: null,
+    auditorAssignments: [],
+    previousInternalAssignments: submittedPreviousInternalAssignments,
   };
 };
 
@@ -464,6 +477,7 @@ export default function AuditForm({ schema, academicYear = schema.academicYear, 
           }
           previousInternalAuditor={academicPartEReview?.internalAuditor}
           previousInternalValues={academicPartEReview?.reportCategory === "external" ? academicPartEReview?.internalValues : {}}
+          auditorAssignments={academicPartEReview?.auditorAssignments || []}
           iqacRemarks={academicPartEReview?.iqacRemarks}
         />
       </div>
