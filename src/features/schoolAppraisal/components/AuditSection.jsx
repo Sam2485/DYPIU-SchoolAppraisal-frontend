@@ -19,6 +19,38 @@ const hasPartEValues = (values = {}) =>
     return String(value || "").trim().length > 0;
   });
 
+const safeObjectValue = (value) => {
+  if (!value) return {};
+  if (typeof value === "object" && !Array.isArray(value)) return value;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
+};
+
+const assignmentPartEValues = (assignment = {}) => {
+  const values = safeObjectValue(assignment.values || assignment.valuesData || assignment.reviewValues || assignment.reviewValuesData);
+  return {
+    ...values,
+    auditObservations: assignment.auditObservations || values.auditObservations || "",
+    auditRecommendations: assignment.auditRecommendations || values.auditRecommendations || "",
+    auditDocumentation: assignment.auditDocumentation || values.auditDocumentation || "",
+  };
+};
+
+const assignmentAuditor = (assignment = {}) => ({
+  name: assignment.auditorName || assignment.name || "",
+  designation: assignment.auditorDesignation || assignment.designation || "",
+  role: assignment.auditorRole || assignment.role || assignment.auditorType || "",
+  email: assignment.auditorEmail || assignment.email || "",
+  date: assignment.submittedAt || assignment.auditorReviewedOn || "",
+});
+
 function FieldGrid({ fields, values, onFieldChange, readOnly = false }) {
   return (
     <div className="audit-field-grid" style={styles.fieldGrid}>
@@ -166,6 +198,27 @@ function PartEAuditorBlock({ title, fields, values, auditor }) {
   );
 }
 
+function PartEAuditorAssignmentBlocks({ title, fields, assignments = [] }) {
+  const reviews = assignments
+    .map((assignment) => ({
+      values: assignmentPartEValues(assignment),
+      auditor: assignmentAuditor(assignment),
+    }))
+    .filter((review) => hasPartEValues(review.values));
+
+  if (!reviews.length) return null;
+
+  return reviews.map((review, index) => (
+    <PartEAuditorBlock
+      key={`${title}-${review.auditor.email || review.auditor.name || index}`}
+      title={reviews.length > 1 ? `${title} - ${index + 1}` : title}
+      fields={fields}
+      values={review.values}
+      auditor={review.auditor}
+    />
+  ));
+}
+
 function AcademicPartEReviewPanel({ fields, review }) {
   if (!review || review.isApproved === false) {
     return (
@@ -179,17 +232,29 @@ function AcademicPartEReviewPanel({ fields, review }) {
   }
 
   const hasExternalReview = hasPartEValues(review?.externalValues);
+  const internalAssignments = review?.reportCategory === "external"
+    ? review?.previousInternalAssignments
+    : review?.auditorAssignments;
+  const hasInternalAssignmentReviews = (internalAssignments || []).some((assignment) => hasPartEValues(assignmentPartEValues(assignment)));
+  const externalAssignments = review?.reportCategory === "external" ? review?.auditorAssignments : [];
+  const hasExternalAssignmentReviews = externalAssignments.some((assignment) => hasPartEValues(assignmentPartEValues(assignment)));
 
   return (
     <div style={styles.partEReviewPanel}>
-      <PartEAuditorBlock
-        title="Internal Auditor Part E"
-        fields={fields}
-        values={review?.internalValues}
-        auditor={review?.internalAuditor}
-      />
+      {hasInternalAssignmentReviews ? (
+        <PartEAuditorAssignmentBlocks title="Internal Auditor Part E" fields={fields} assignments={internalAssignments} />
+      ) : (
+        <PartEAuditorBlock
+          title="Internal Auditor Part E"
+          fields={fields}
+          values={review?.internalValues}
+          auditor={review?.internalAuditor}
+        />
+      )}
       {review?.reportCategory === "external" && (
-        hasExternalReview ? (
+        hasExternalAssignmentReviews ? (
+          <PartEAuditorAssignmentBlocks title="External Auditor Part E" fields={fields} assignments={externalAssignments} />
+        ) : hasExternalReview ? (
           <PartEAuditorBlock
             title="External Auditor Part E"
             fields={fields}

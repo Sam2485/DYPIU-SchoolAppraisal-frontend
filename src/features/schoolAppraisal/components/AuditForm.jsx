@@ -179,12 +179,11 @@ const buildAcademicPartEReview = (draft = {}, history = []) => {
 
   const internalAuditor = previousInternalAssignment ? assignmentAuditor(previousInternalAssignment) : getAuditorSignOff(previousInternal);
   const previousIqacRemarks = previousInternal?.remarks || "";
+  const assignments = Array.isArray(draft.auditorAssignments) ? draft.auditorAssignments : [];
+  const externalAssignments = assignmentsForType(assignments, "external");
+  const externalAssignment = latestSubmittedAssignment(externalAssignments);
 
   if (status === "approved") {
-    const assignments = Array.isArray(draft.auditorAssignments) ? draft.auditorAssignments : [];
-    const externalAssignments = assignmentsForType(assignments, "external");
-    const externalAssignment = latestSubmittedAssignment(externalAssignments);
-
     const externalValues =
       externalAssignment ? normalizedAssignmentValues(externalAssignment) :
       currentHasPartE ? draft.values :
@@ -213,8 +212,8 @@ const buildAcademicPartEReview = (draft = {}, history = []) => {
     iqacRemarks: "",
     previousIqacRemarks,
     internalAuditor,
-    externalAuditor: null,
-    auditorAssignments: [],
+    externalAuditor: externalAssignment ? assignmentAuditor(externalAssignment) : null,
+    auditorAssignments: externalAssignments,
     previousInternalAssignments: submittedPreviousInternalAssignments,
   };
 };
