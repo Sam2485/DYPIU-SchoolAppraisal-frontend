@@ -54,6 +54,7 @@ const normalizeSchoolList = (value) => {
   const values = normalizeAcademicSchoolCodes(value);
   return [...new Set(values)];
 };
+const mergeSchoolLists = (...values) => [...new Set(values.flatMap(normalizeSchoolList))];
 
 const normalizeUser = (user = {}, index = 0) => {
   const role = String(user.role || "").toLowerCase().replaceAll("_", "-");
@@ -86,16 +87,22 @@ const normalizeUser = (user = {}, index = 0) => {
     ? (administrativePosts.length ? administrativePosts : normalizePostList(user.post))
     : [];
   const apiAcademicSchools = category === "academic"
-    ? (
-        normalizeSchoolList(user.schools || user.assignedSchools || user.academicSchools || user.schoolCodes).length
-          ? normalizeSchoolList(user.schools || user.assignedSchools || user.academicSchools || user.schoolCodes)
-          : normalizeSchoolList(user.school || user.schoolName || user.assignment)
+    ? mergeSchoolLists(
+        user.schools,
+        user.assignedSchools,
+        user.academicSchools,
+        user.schoolCodes,
+        user.assignedSchoolCodes,
+        user.academicSchoolCodes,
+        user.school,
+        user.schoolName,
+        user.assignment,
       )
     : [];
   const cachedAcademicSchools = accountType === "auditor" && category === "academic"
     ? getStoredAcademicAuditorSchools(user)
     : [];
-  const academicSchools = cachedAcademicSchools.length ? cachedAcademicSchools : apiAcademicSchools;
+  const academicSchools = mergeSchoolLists(apiAcademicSchools, cachedAcademicSchools);
 
   return {
     ...user,
@@ -234,6 +241,8 @@ export default function UserManagementPanel() {
   const [creating, setCreating] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deletingId, setDeletingId] = useState("");
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
   const [editForm, setEditForm] = useState(emptyForm);
   const [editErrors, setEditErrors] = useState({});
@@ -466,6 +475,36 @@ export default function UserManagementPanel() {
     }
   };
 
+  const handleDeleteAllUsers = async () => {
+    if (!users.length || bulkDeleting) return;
+
+    const targets = users;
+    setBulkDeleting(true);
+    setStatus("");
+
+    try {
+      const results = await Promise.allSettled(targets.map((user) => deleteUser(user.id)));
+      const deletedUsers = targets.filter((_, index) => results[index].status === "fulfilled");
+      const failedCount = targets.length - deletedUsers.length;
+
+      deletedUsers.forEach(forgetAcademicAuditorSchools);
+      setUsers((current) => {
+        const deletedIds = new Set(deletedUsers.map((user) => user.id));
+        return current.filter((user) => !deletedIds.has(user.id));
+      });
+      setBulkDeleteOpen(false);
+      setStatus(
+        failedCount
+          ? `${deletedUsers.length} users deleted. ${failedCount} could not be deleted.`
+          : `${deletedUsers.length} users deleted successfully.`
+      );
+    } catch (error) {
+      setStatus(getApiErrorMessage(error, "Could not delete all users."));
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
   const handleUpdate = async (event) => {
     event.preventDefault();
     if (!editTarget?.id) return;
@@ -542,6 +581,15 @@ export default function UserManagementPanel() {
           <p style={styles.description}>View Academic, Administrative and auditor accounts or create a new account.</p>
         </div>
         <div style={styles.headingActions}>
+          <button
+            type="button"
+            style={styles.deleteAllButton}
+            className="user-management-no-print"
+            onClick={() => setBulkDeleteOpen(true)}
+            disabled={loading || !users.length || bulkDeleting}
+          >
+            Delete All Users
+          </button>
           <button type="button" className="btn btn-secondary user-management-no-print" onClick={handlePrintUsers} disabled={loading || !users.length}>
             <span aria-hidden="true">⎙</span>
             Print Users
@@ -730,7 +778,7 @@ export default function UserManagementPanel() {
                     </span>
                   </td>
                   <td style={{ ...styles.td, ...styles.centerCell }}><span style={styles.categoryPill}>{user.category}</span></td>
-                  <td style={styles.td}>{user.assignment}</td>
+                  <td style={styles.td}>{assignmentCellFor(user)}</td>
                   <td style={{ ...styles.td, ...styles.centerCell }}>{user.role}</td>
                   <td style={{ ...styles.td, ...styles.centerCell }}><span style={user.status === "active" ? styles.activeStatus : styles.inactiveStatus}>{user.status}</span></td>
                   <td style={{ ...styles.td, ...styles.actionCell }}>
@@ -783,6 +831,14 @@ export default function UserManagementPanel() {
         deletingId={deletingId}
         onCancel={() => setDeleteTarget(null)}
         onConfirm={handleDelete}
+      />
+      <DeleteAllUsersDialog
+        open={bulkDeleteOpen}
+        totalUsers={users.length}
+        totalAuditors={userStats.auditors}
+        deleting={bulkDeleting}
+        onCancel={() => setBulkDeleteOpen(false)}
+        onConfirm={handleDeleteAllUsers}
       />
 
       {shouldRenderInlineDeleteDialog() && deleteTarget && (
@@ -1006,7 +1062,7 @@ function PrintableUsersReport({ users, stats }) {
                 <td>{user.email}</td>
                 <td>{user.accountType === "auditor" ? `${titleCase(user.auditorType)} Auditor` : "User"}</td>
                 <td>{user.category}</td>
-                <td>{user.assignment}</td>
+                <td>{assignmentTextFor(user)}</td>
                 <td>{user.role}</td>
               </tr>
             )) : (
@@ -1039,6 +1095,32 @@ const schoolLabelFor = (value) => {
   const school = SCHOOL_OPTIONS.find((option) => option.code.toUpperCase() === value);
   return school ? `${school.name} (${school.code})` : value;
 };
+
+function assignmentTextFor(user = {}) {
+  if (user.accountType === "auditor" && user.category === "academic" && user.schools?.length) {
+    return user.schools.map(schoolLabelFor).join(", ");
+  }
+  return user.assignment;
+}
+
+function assignmentCellFor(user = {}) {
+  if (user.accountType === "auditor" && user.category === "academic" && user.schools?.length > 1) {
+    return (
+      <div style={styles.assignmentBadgeList}>
+        {user.schools.map((school) => (
+          <span key={school} style={styles.assignmentBadge} title={schoolLabelFor(school)}>{school}</span>
+        ))}
+      </div>
+    );
+  }
+
+  if (user.accountType === "auditor" && user.category === "academic" && user.schools?.length === 1) {
+    const [school] = user.schools;
+    return <span title={schoolLabelFor(school)}>{school}</span>;
+  }
+
+  return assignmentTextFor(user);
+}
 
 function AcademicSchoolMultiSelect({ selected, onToggle }) {
   const summary = selected.length
@@ -1158,6 +1240,37 @@ function DeleteUserDialog({ target, deletingId, onCancel, onConfirm }) {
   );
 }
 
+function DeleteAllUsersDialog({ open, totalUsers, totalAuditors, deleting, onCancel, onConfirm }) {
+  if (!open || typeof document === "undefined") return null;
+
+  return createPortal(
+    <div style={styles.modalOverlay} role="dialog" aria-modal="true" aria-labelledby="delete-all-users-title">
+      <div style={styles.modalCard}>
+        <div style={styles.warningIcon}>!</div>
+        <div>
+          <p style={styles.kicker}>Delete all users</p>
+          <h3 id="delete-all-users-title" style={styles.modalTitle}>Remove every account?</h3>
+          <p style={styles.modalText}>
+            This will delete <strong>{totalUsers}</strong> user account{totalUsers === 1 ? "" : "s"}, including <strong>{totalAuditors}</strong> auditor account{totalAuditors === 1 ? "" : "s"}.
+          </p>
+          <div style={styles.deleteAllWarning}>
+            This action cannot be undone from User Management.
+          </div>
+        </div>
+        <div style={styles.modalActions}>
+          <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={deleting}>
+            Cancel
+          </button>
+          <button type="button" style={styles.confirmDeleteButton} onClick={onConfirm} disabled={deleting || !totalUsers}>
+            {deleting ? "Deleting all..." : "Yes, Delete All"}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 function Field({ label, error, children }) {
   return (
     <div style={styles.field}>
@@ -1171,7 +1284,8 @@ function Field({ label, error, children }) {
 const styles = {
   panel: { display: "flex", flexDirection: "column", gap: 18 },
   headingRow: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 18, padding: 20, border: "1px solid #e2e8f0", borderRadius: 16, background: "#fff", boxShadow: "0 12px 35px rgba(15,23,42,.045)" },
-  headingActions: { display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 10, flexWrap: "wrap" },
+  headingActions: { display: "flex", flexDirection: "row-reverse", alignItems: "center", justifyContent: "flex-start", gap: 10, flexWrap: "wrap" },
+  deleteAllButton: { minHeight: 42, marginLeft: 14, border: "1px solid #fecaca", borderRadius: 10, padding: "10px 14px", color: "#b91c1c", background: "#fff5f5", fontSize: 12.5, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" },
   kicker: { margin: "0 0 5px", color: "#2563eb", fontSize: 10, fontWeight: 750, letterSpacing: ".08em", textTransform: "uppercase" },
   title: { margin: "0 0 5px", color: "#0f172a", fontSize: 20, fontWeight: 700 },
   description: { margin: 0, color: "#64748b", fontSize: 12.5 },
@@ -1215,6 +1329,8 @@ const styles = {
   actionCell: { width: 96, textAlign: "center" },
   emptyCell: { padding: 28, color: "#64748b", fontSize: 12, textAlign: "center" },
   categoryPill: { textTransform: "capitalize", color: "#1d4ed8", fontWeight: 700 },
+  assignmentBadgeList: { display: "flex", alignItems: "flex-start", flexWrap: "wrap", gap: 5 },
+  assignmentBadge: { display: "inline-flex", maxWidth: "100%", padding: "4px 7px", border: "1px solid #bfdbfe", borderRadius: 999, color: "#1d4ed8", background: "#eff6ff", fontSize: 11, fontWeight: 800, lineHeight: 1.15, whiteSpace: "nowrap" },
   userPill: { display: "inline-flex", padding: "4px 7px", borderRadius: 999, color: "#475569", background: "#f1f5f9", fontSize: 10.5, fontWeight: 750, textTransform: "capitalize" },
   auditorPill: { display: "inline-flex", padding: "4px 7px", borderRadius: 999, color: "#7c2d12", background: "#ffedd5", fontSize: 10.5, fontWeight: 750, textTransform: "capitalize" },
   activeStatus: { display: "inline-flex", padding: "4px 7px", borderRadius: 999, color: "#166534", background: "#dcfce7", fontSize: 10.5, fontWeight: 700, textTransform: "capitalize" },
@@ -1230,6 +1346,7 @@ const styles = {
   modalTitle: { margin: "0 0 8px", color: "#0f172a", fontSize: 18, fontWeight: 800 },
   modalText: { margin: 0, color: "#475569", fontSize: 13, lineHeight: 1.55 },
   deleteUserPreview: { display: "flex", alignItems: "center", gap: 10, marginTop: 14, padding: 10, border: "1px solid #fee2e2", borderRadius: 14, background: "#fff", color: "#0f172a", fontSize: 12 },
+  deleteAllWarning: { marginTop: 14, padding: "10px 12px", border: "1px solid #fecaca", borderRadius: 12, color: "#991b1b", background: "#fef2f2", fontSize: 12, fontWeight: 750 },
   previewAvatar: { width: 34, height: 34, display: "grid", placeItems: "center", borderRadius: 12, color: "#fff", background: "linear-gradient(135deg, #ef4444, #f97316)", fontWeight: 900 },
   previewMeta: { display: "block", marginTop: 2, color: "#64748b", fontSize: 11 },
   modalActions: { gridColumn: "1 / -1", display: "flex", justifyContent: "flex-end", gap: 10, paddingTop: 6 },

@@ -54,13 +54,14 @@ export const normalizeAcademicSchoolCodes = (value) =>
 
 const ACADEMIC_AUDITOR_SCHOOLS_STORAGE_KEY = "schoolAppraisal.academicAuditorSchools";
 
+const identityKeysForUser = (user = {}) =>
+  uniqueValues([user.id, user.userId].map((value) => String(value || "").trim().toLowerCase()));
+
+const fallbackKeysForUser = (user = {}) =>
+  uniqueValues([user.email, user.username].map((value) => String(value || "").trim().toLowerCase()));
+
 const storageKeysForUser = (user = {}) =>
-  uniqueValues([
-    user.id,
-    user.userId,
-    user.email,
-    user.username,
-  ].map((value) => String(value || "").trim().toLowerCase()));
+  uniqueValues([...identityKeysForUser(user), ...fallbackKeysForUser(user)]);
 
 const readStoredAcademicAuditorSchools = () => {
   try {
@@ -80,7 +81,9 @@ const writeStoredAcademicAuditorSchools = (value) => {
 
 export const getStoredAcademicAuditorSchools = (user = {}) => {
   const stored = readStoredAcademicAuditorSchools();
-  const key = storageKeysForUser(user).find((item) => stored[item]);
+  const identityKeys = identityKeysForUser(user);
+  const lookupKeys = identityKeys.length ? identityKeys : fallbackKeysForUser(user);
+  const key = lookupKeys.find((item) => stored[item]);
   return key ? normalizeAcademicSchoolCodes(stored[key]) : [];
 };
 
