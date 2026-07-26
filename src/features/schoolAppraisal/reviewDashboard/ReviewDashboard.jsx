@@ -366,6 +366,13 @@ const isAuditorCorrectionRequested = (submission = {}) =>
     submission.correctionRequestedForAuditor ||
     submission.requiresAuditorResubmission
   );
+const DEFAULT_AUDITOR_CORRECTION_MESSAGE = "Please rectify the auditor observations/recommendations and submit the review again.";
+const reviewRemarksForDisplay = (submission = {}) => {
+  const remarks = submission.remarks || "";
+  const correctionMessage = submission.auditorCorrectionMessage || "";
+  if (remarks && (remarks === DEFAULT_AUDITOR_CORRECTION_MESSAGE || remarks === correctionMessage)) return "";
+  return remarks;
+};
 const submittedAuditorAssignmentsForSubmission = (submission = {}) =>
   (submission.auditorAssignments || []).filter((assignment) =>
     auditorAssignmentBelongsToSubmission(assignment, submission)
@@ -779,6 +786,12 @@ const normalizeAuditorAssignment = (assignment = {}, index = 0) => {
     school,
     status,
     submittedAt,
+    auditorCorrectionRequested: Boolean(assignment.auditorCorrectionRequested),
+    correctionRequestedForAuditor: Boolean(assignment.correctionRequestedForAuditor),
+    requiresAuditorResubmission: Boolean(assignment.requiresAuditorResubmission),
+    auditorCorrectionMessage: assignment.auditorCorrectionMessage || assignment.correctionRemarks || "",
+    auditorCorrectionRequestedOn: assignment.auditorCorrectionRequestedOn || assignment.correctionRequestedOn || "",
+    auditorCorrectionRequestedBy: assignment.auditorCorrectionRequestedBy || assignment.correctionRequestedBy || "",
     values: safeObjectValue(assignment.values || assignment.valuesData || assignment.reviewValues || assignment.reviewValuesData),
     attachments: arrayValue(assignment.attachments),
   };
@@ -884,14 +897,7 @@ const currentAuditorCorrectionRequested = (submission = {}, profile = {}) => {
     assignment.correctionRequestedForAuditor ||
     assignment.requiresAuditorResubmission
   );
-  if (currentAssignmentHasCorrection) return true;
-
-  const anyAssignmentHasCorrection = (submission.auditorAssignments || []).some((assignment) =>
-    assignment.auditorCorrectionRequested ||
-    assignment.correctionRequestedForAuditor ||
-    assignment.requiresAuditorResubmission
-  );
-  return isAuditorCorrectionRequested(submission) && !anyAssignmentHasCorrection;
+  return currentAssignmentHasCorrection;
 };
 const auditorPostsForCurrentSubmission = (submission = {}, profile = {}) => {
   const assignedPosts = auditorAssignmentsForCurrentUser(submission, profile).map((assignment) => assignment.post).filter(Boolean);
@@ -1602,7 +1608,6 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
     setCorrectionTarget(submission);
     setCorrectionMessage(
       submission.auditorCorrectionMessage ||
-      submission.remarks ||
       "Please rectify the auditor observations/recommendations and submit the review again."
     );
   };
@@ -1685,7 +1690,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
       storeAuditorCorrections(submission, correctionAssignments, trimmedMessage, requestedOn);
       const payload = {
         status: backendStatusFor("under-review"),
-        remarks: trimmedMessage,
+        remarks: "",
         forwardedToAuditorId: forwardedToAuditorIds[0] || submission.forwardedToAuditorId || "",
         forwardedToAuditorName: forwardedToAuditorNames[0] || submission.forwardedToAuditorName || "",
         forwardedToAuditorEmail: forwardedToAuditorEmails[0] || submission.forwardedToAuditorEmail || "",
@@ -1712,7 +1717,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
       await updateSubmissionById(submission.id, payload);
       updateSubmission(submission.auditType, submission.id, {
         status: "under-review",
-        remarks: trimmedMessage,
+        remarks: "",
         forwardedToAuditorId: forwardedToAuditorIds[0] || submission.forwardedToAuditorId || "",
         forwardedToAuditorName: forwardedToAuditorNames[0] || submission.forwardedToAuditorName || "",
         forwardedToAuditorEmail: forwardedToAuditorEmails[0] || submission.forwardedToAuditorEmail || "",
@@ -2059,6 +2064,11 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
       const allAssignedAuditorsSubmitted = auditorAssignments.length
         ? auditorProgress.allSubmitted
         : Boolean(allAuditorsSubmitted);
+      const auditorCorrectionPending = auditorAssignments.some((assignment) =>
+        assignment.auditorCorrectionRequested ||
+        assignment.correctionRequestedForAuditor ||
+        assignment.requiresAuditorResubmission
+      );
       removeStoredAuditorCorrections(submission, currentAssignments, allAssignedAuditorsSubmitted);
       if (allAssignedAuditorsSubmitted) {
         await updateSubmissionById(submission.id, {
@@ -2096,10 +2106,10 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
           auditorReviewedByRole: role,
           auditorReviewedOn,
         } : {}),
-        auditorCorrectionRequested: !allAssignedAuditorsSubmitted,
-        correctionRequestedForAuditor: !allAssignedAuditorsSubmitted,
-        requiresAuditorResubmission: !allAssignedAuditorsSubmitted,
-        auditorCorrectionMessage: allAssignedAuditorsSubmitted ? "" : submission.auditorCorrectionMessage,
+        auditorCorrectionRequested: auditorCorrectionPending,
+        correctionRequestedForAuditor: auditorCorrectionPending,
+        requiresAuditorResubmission: auditorCorrectionPending,
+        auditorCorrectionMessage: auditorCorrectionPending ? submission.auditorCorrectionMessage : "",
       });
     } catch (reviewError) {
       setError(getApiErrorMessage(reviewError, "Could not submit your auditor review."));
@@ -2909,7 +2919,7 @@ function FullFormReview({
   const [draftAttachments, setDraftAttachments] = useState(
     initialDraftAttachments
   );
-  const [reviewRemarks, setReviewRemarks] = useState(submission.remarks || "");
+  const [reviewRemarks, setReviewRemarks] = useState(reviewRemarksForDisplay(submission));
   const [activeSectionIndex, setActiveSectionIndex] = useState(0);
   const [reportMode, setReportMode] = useState(false);
   const activeSection = sections[activeSectionIndex] || sections[0];
@@ -3130,7 +3140,7 @@ function FullFormReview({
                 <div style={styles.readOnlyReviewNotice}>
                   This approved report is an immutable historical Version {submission.version}.
                 </div>
-                {submission.remarks && (
+                {reviewRemarksForDisplay(submission) && (
                   <div style={{ marginTop: 16, marginBottom: 16 }}>
                     <label style={styles.remarksLabel}>IQAC Review Remarks</label>
                     <div
@@ -3147,7 +3157,7 @@ function FullFormReview({
                         wordBreak: "break-word",
                       }}
                     >
-                      {submission.remarks}
+                      {reviewRemarksForDisplay(submission)}
                     </div>
                   </div>
                 )}
