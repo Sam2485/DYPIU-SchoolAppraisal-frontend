@@ -4,7 +4,15 @@ import { getApiErrorMessage } from "../../../api/client";
 import { createUser, deleteUser, fetchUsers, updateUser } from "../../../api/users";
 import { formatDateDDMMYYYY } from "../../../utils/dateFormat";
 import { LoadingState } from "../components/LoadingState";
-import { ADMINISTRATIVE_POSTS, SCHOOL_OPTIONS, canonicalSchoolCode } from "./userManagementConfig";
+import {
+  ADMINISTRATIVE_POSTS,
+  SCHOOL_OPTIONS,
+  canonicalSchoolCode,
+  forgetAcademicAuditorSchools,
+  getStoredAcademicAuditorSchools,
+  normalizeAcademicSchoolCodes,
+  rememberAcademicAuditorSchools,
+} from "./userManagementConfig";
 
 const emptyForm = {
   accountType: "user",
@@ -43,14 +51,7 @@ const normalizePostList = (value) => {
   return [];
 };
 const normalizeSchoolList = (value) => {
-  const values = normalizePostList(value)
-    .map((school) => {
-      if (school && typeof school === "object") {
-        return canonicalSchoolCode(school.code || school.schoolCode || school.school || school.schoolName || school.name);
-      }
-      return canonicalSchoolCode(school);
-    })
-    .filter(Boolean);
+  const values = normalizeAcademicSchoolCodes(value);
   return [...new Set(values)];
 };
 
@@ -84,13 +85,17 @@ const normalizeUser = (user = {}, index = 0) => {
   const resolvedAdministrativePosts = accountType === "auditor" && category === "administrative"
     ? (administrativePosts.length ? administrativePosts : normalizePostList(user.post))
     : [];
-  const academicSchools = category === "academic"
+  const apiAcademicSchools = category === "academic"
     ? (
         normalizeSchoolList(user.schools || user.assignedSchools || user.academicSchools || user.schoolCodes).length
           ? normalizeSchoolList(user.schools || user.assignedSchools || user.academicSchools || user.schoolCodes)
           : normalizeSchoolList(user.school || user.schoolName || user.assignment)
       )
     : [];
+  const cachedAcademicSchools = accountType === "auditor" && category === "academic"
+    ? getStoredAcademicAuditorSchools(user)
+    : [];
+  const academicSchools = cachedAcademicSchools.length ? cachedAcademicSchools : apiAcademicSchools;
 
   return {
     ...user,
@@ -126,6 +131,23 @@ const roleForForm = (form) => form.accountType === "auditor"
 const designationForForm = (form) => {
   if (form.accountType === "auditor") return `${titleCase(form.auditorType)} ${titleCase(form.category)} Auditor`;
   return form.category === "academic" ? "Director" : postLabelFor(form.post);
+};
+const academicAssignmentPayload = (schools = [], isAuditor = false) => {
+  const academicSchools = normalizeSchoolList(schools);
+  const schoolValue = isAuditor ? academicSchools.join(", ") : academicSchools[0] || "";
+
+  return {
+    school: schoolValue,
+    schoolName: schoolValue,
+    assignment: schoolValue,
+    schoolCode: isAuditor ? "" : academicSchools[0] || "",
+    schools: isAuditor ? academicSchools : [],
+    assignedSchools: isAuditor ? academicSchools : [],
+    academicSchools: isAuditor ? academicSchools : [],
+    schoolCodes: isAuditor ? academicSchools : [],
+    assignedSchoolCodes: isAuditor ? academicSchools : [],
+    academicSchoolCodes: isAuditor ? academicSchools : [],
+  };
 };
 
 const formatDate = (date = new Date()) => formatDateDDMMYYYY(date);
@@ -216,8 +238,20 @@ export default function UserManagementPanel() {
   const [editForm, setEditForm] = useState(emptyForm);
   const [editErrors, setEditErrors] = useState({});
   const [updatingId, setUpdatingId] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [accountFilter, setAccountFilter] = useState("all");
 
   const schools = useMemo(() => SCHOOL_OPTIONS, []);
+  const filteredUsers = useMemo(() =>
+    users.filter((user) =>
+      (categoryFilter === "all" || user.category === categoryFilter) &&
+      (
+        accountFilter === "all" ||
+        user.accountType === accountFilter ||
+        (accountFilter === "internal-auditor" && user.accountType === "auditor" && user.auditorType === "internal") ||
+        (accountFilter === "external-auditor" && user.accountType === "auditor" && user.auditorType === "external")
+      )
+    ), [accountFilter, categoryFilter, users]);
   const userStats = useMemo(() => ({
     total: users.length,
     academic: users.filter((user) => user.category === "academic").length,
@@ -314,6 +348,9 @@ export default function UserManagementPanel() {
     const academicSchools = isAcademic && form.accountType === "auditor"
       ? form.schools
       : [canonicalSchoolCode(form.school)].filter(Boolean);
+    const assignmentPayload = isAcademic
+      ? academicAssignmentPayload(academicSchools, form.accountType === "auditor")
+      : { school: "Administrative Office", schoolName: "Administrative Office", schools: [] };
     const payload = {
       accountType: form.accountType,
       userType: form.accountType,
@@ -322,8 +359,7 @@ export default function UserManagementPanel() {
       auditorType: form.accountType === "auditor" ? form.auditorType : null,
       auditorRole: form.accountType === "auditor" ? auditorRoleForForm(form) : null,
       role: roleForForm(form),
-      school: isAcademic ? academicSchools[0] : "Administrative Office",
-      schools: isAcademic && form.accountType === "auditor" ? academicSchools : [],
+      ...assignmentPayload,
       designation: designationForForm(form),
       post: isAcademic
         ? null
@@ -342,6 +378,11 @@ export default function UserManagementPanel() {
     try {
       const { data } = await createUser(payload);
       const created = data?.data?.user || data?.user || data?.data || data || payload;
+      if (payload.accountType === "auditor" && payload.category === "academic") {
+        rememberAcademicAuditorSchools({ ...payload, ...created }, academicSchools);
+      } else {
+        forgetAcademicAuditorSchools({ ...payload, ...created });
+      }
       setUsers((current) => [normalizeUser({ ...payload, ...created }), ...current]);
       setStatus(`${form.accountType === "auditor" ? "Auditor" : "User"} account created successfully.`);
       setForm(emptyForm);
@@ -414,6 +455,7 @@ export default function UserManagementPanel() {
 
     try {
       await deleteUser(deleteTarget.id);
+      forgetAcademicAuditorSchools(deleteTarget);
       setUsers((current) => current.filter((user) => user.id !== deleteTarget.id));
       setStatus(`${deleteTarget.name} deleted successfully.`);
       setDeleteTarget(null);
@@ -436,6 +478,9 @@ export default function UserManagementPanel() {
     const academicSchools = isAcademic && editForm.accountType === "auditor"
       ? editForm.schools
       : [canonicalSchoolCode(editForm.school)].filter(Boolean);
+    const assignmentPayload = isAcademic
+      ? academicAssignmentPayload(academicSchools, editForm.accountType === "auditor")
+      : { school: "Administrative Office", schoolName: "Administrative Office", schools: [] };
     const payload = {
       accountType: editForm.accountType,
       userType: editForm.accountType,
@@ -444,8 +489,7 @@ export default function UserManagementPanel() {
       auditorType: editForm.accountType === "auditor" ? editForm.auditorType : null,
       auditorRole: editForm.accountType === "auditor" ? auditorRoleForForm(editForm) : null,
       role: roleForForm(editForm),
-      school: isAcademic ? academicSchools[0] : "Administrative Office",
-      schools: isAcademic && editForm.accountType === "auditor" ? academicSchools : [],
+      ...assignmentPayload,
       designation: designationForForm(editForm),
       post: isAcademic
         ? null
@@ -464,6 +508,11 @@ export default function UserManagementPanel() {
     try {
       const { data } = await updateUser(editTarget.id, payload);
       const updated = data?.data?.user || data?.user || data?.data || data || payload;
+      if (payload.accountType === "auditor" && payload.category === "academic") {
+        rememberAcademicAuditorSchools({ ...editTarget, ...payload, ...updated }, academicSchools);
+      } else {
+        forgetAcademicAuditorSchools({ ...editTarget, ...payload, ...updated });
+      }
       setUsers((current) =>
         current.map((user) => user.id === editTarget.id ? normalizeUser({ ...user, ...payload, ...updated }) : user)
       );
@@ -478,6 +527,10 @@ export default function UserManagementPanel() {
 
   const handlePrintUsers = () => {
     window.setTimeout(() => window.print(), 80);
+  };
+  const resetFilters = () => {
+    setCategoryFilter("all");
+    setAccountFilter("all");
   };
 
   return (
@@ -632,6 +685,29 @@ export default function UserManagementPanel() {
           </div>
         </div>
 
+        <div className="user-management-no-print" style={styles.filterBar}>
+          <label style={styles.filterField}>
+            <span style={styles.label}>Category</span>
+            <select className="audit-control" style={styles.filterControl} value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}>
+              <option value="all">All Categories</option>
+              <option value="academic">Academic</option>
+              <option value="administrative">Administrative</option>
+            </select>
+          </label>
+          <label style={styles.filterField}>
+            <span style={styles.label}>Account</span>
+            <select className="audit-control" style={styles.filterControl} value={accountFilter} onChange={(event) => setAccountFilter(event.target.value)}>
+              <option value="all">All Accounts</option>
+              <option value="user">Users</option>
+              <option value="internal-auditor">Internal Auditors</option>
+              <option value="external-auditor">External Auditors</option>
+            </select>
+          </label>
+          <button type="button" className="btn btn-secondary" onClick={resetFilters} disabled={categoryFilter === "all" && accountFilter === "all"}>
+            Clear Filters
+          </button>
+        </div>
+
         <div style={styles.scroller}>
           <table style={styles.table}>
             <thead>
@@ -644,7 +720,7 @@ export default function UserManagementPanel() {
             <tbody>
               {loading ? (
                 <tr><td colSpan="8" style={styles.emptyCell}><LoadingState label="Loading user accounts..." compact /></td></tr>
-              ) : users.length ? users.map((user) => (
+              ) : filteredUsers.length ? filteredUsers.map((user) => (
                 <tr key={user.id}>
                   <td style={styles.td}><strong>{user.name}</strong></td>
                   <td style={styles.td}>{user.email}</td>
@@ -695,7 +771,7 @@ export default function UserManagementPanel() {
                   </td>
                 </tr>
               )) : (
-                <tr><td colSpan="8" style={styles.emptyCell}>No users are available yet.</td></tr>
+                <tr><td colSpan="8" style={styles.emptyCell}>{users.length ? "No users match the selected filters." : "No users are available yet."}</td></tr>
               )}
             </tbody>
           </table>
@@ -749,7 +825,7 @@ export default function UserManagementPanel() {
         </div>
       )}
 
-      {editTarget && (
+      {editTarget && typeof document !== "undefined" && createPortal((
         <div style={styles.editOverlay} role="dialog" aria-modal="true" aria-labelledby="edit-user-title">
           <form style={styles.editModalCard} onSubmit={handleUpdate}>
             <div style={styles.editModalHeader}>
@@ -872,9 +948,9 @@ export default function UserManagementPanel() {
             </div>
           </form>
         </div>
-      )}
+      ), document.body)}
 
-      <PrintableUsersReport users={users} stats={userStats} />
+      <PrintableUsersReport users={filteredUsers} stats={userStats} />
     </section>
   );
 }
@@ -1128,6 +1204,9 @@ const styles = {
   tableBadges: { display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" },
   count: { padding: "5px 8px", borderRadius: 999, color: "#475569", background: "#f1f5f9", fontSize: 10.5, fontWeight: 700 },
   printHint: { padding: "5px 8px", borderRadius: 999, color: "#1d4ed8", background: "#eff6ff", fontSize: 10.5, fontWeight: 750 },
+  filterBar: { display: "grid", gridTemplateColumns: "minmax(180px, 240px) minmax(180px, 240px) auto", alignItems: "end", justifyContent: "start", gap: 12, padding: "14px 20px", borderBottom: "1px solid #edf1f6", background: "#f8fafc" },
+  filterField: { display: "flex", flexDirection: "column", gap: 6 },
+  filterControl: { width: "100%", minHeight: 40, border: "1px solid #d7dee9", borderRadius: 8, padding: "8px 10px", color: "#0f172a", background: "#fff", outline: "none" },
   scroller: { overflowX: "auto" },
   table: { width: "100%", borderCollapse: "collapse", tableLayout: "fixed" },
   th: { padding: "10px 11px", borderRight: "1px solid #3a465b", color: "#f8fafc", background: "#1e293b", fontSize: 11.5, fontWeight: 700, textAlign: "left" },
@@ -1155,8 +1234,8 @@ const styles = {
   previewMeta: { display: "block", marginTop: 2, color: "#64748b", fontSize: 11 },
   modalActions: { gridColumn: "1 / -1", display: "flex", justifyContent: "flex-end", gap: 10, paddingTop: 6 },
   confirmDeleteButton: { border: "1px solid #dc2626", borderRadius: 10, padding: "10px 14px", color: "#fff", background: "linear-gradient(135deg, #ef4444, #b91c1c)", fontSize: 12.5, fontWeight: 800, cursor: "pointer", fontFamily: "inherit", boxShadow: "0 10px 24px rgba(220, 38, 38, .22)" },
-  editOverlay: { position: "fixed", inset: 0, zIndex: 78, display: "grid", placeItems: "center", padding: 20, background: "rgba(15, 23, 42, .48)", backdropFilter: "blur(4px)", overflowY: "auto" },
-  editModalCard: { width: "min(780px, 100%)", display: "flex", flexDirection: "column", gap: 16, padding: 22, border: "1px solid #dbeafe", borderRadius: 22, background: "linear-gradient(180deg, #fff 0%, #f8fbff 100%)", boxShadow: "0 28px 80px rgba(15,23,42,.22)" },
+  editOverlay: { position: "fixed", inset: 0, zIndex: 78, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "24px 20px", background: "rgba(15, 23, 42, .48)", backdropFilter: "blur(4px)", overflowY: "auto" },
+  editModalCard: { width: "min(780px, 100%)", maxHeight: "calc(100vh - 48px)", overflowY: "auto", display: "flex", flexDirection: "column", gap: 16, padding: 22, border: "1px solid #dbeafe", borderRadius: 22, background: "linear-gradient(180deg, #fff 0%, #f8fbff 100%)", boxShadow: "0 28px 80px rgba(15,23,42,.22)" },
   editModalHeader: { display: "flex", alignItems: "flex-start", gap: 14, paddingBottom: 14, borderBottom: "1px solid #e2e8f0" },
   editModalIcon: { width: 46, height: 46, flex: "0 0 46px", display: "grid", placeItems: "center", borderRadius: 16, color: "#1d4ed8", background: "linear-gradient(135deg, #dbeafe, #bfdbfe)", boxShadow: "inset 0 0 0 1px rgba(37,99,235,.08)" },
   editCategoryGrid: { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12 },

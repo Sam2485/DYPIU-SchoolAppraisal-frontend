@@ -23,6 +23,7 @@ export default function AppSidebar({
   roleText,
   academicYear = "2025-26",
   items,
+  pinnedItems = [],
   standaloneItems = [],
   activeId,
   onChange,
@@ -104,7 +105,7 @@ export default function AppSidebar({
         <div className={`app-sidebar__dropdown${isOpen ? " is-open" : ""}`}>
           <button
             type="button"
-            className="app-sidebar__select-card"
+            className={`app-sidebar__select-card${activeItem ? "" : " is-placeholder"}`}
             onClick={() => setIsOpen((open) => !open)}
             aria-haspopup="listbox"
             aria-expanded={isOpen}
@@ -144,6 +145,29 @@ export default function AppSidebar({
             </div>
           )}
         </div>
+        {pinnedItems.length > 0 && (
+          <div className="app-sidebar__pinned-list" aria-label="Pinned appraisal sections">
+            {pinnedItems.map((item) => {
+              const selected = item.id === activeId;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={`app-sidebar__nav-item app-sidebar__pinned-item${selected ? " is-active" : ""}`}
+                  onClick={() => selectSection(item.id)}
+                  aria-current={selected ? "page" : undefined}
+                >
+                  <span className="app-sidebar__nav-icon"><ClipboardIcon /></span>
+                  <span className="app-sidebar__nav-text">
+                    {item.caption && <small>{item.caption}</small>}
+                    <strong>{item.title}</strong>
+                  </span>
+                  {selected && <span className="app-sidebar__active-dot" />}
+                </button>
+              );
+            })}
+          </div>
+        )}
         <span className="app-sidebar__nav-hint">Jump to any section at any time</span>
 
         {actionGroups.length > 0 && (
