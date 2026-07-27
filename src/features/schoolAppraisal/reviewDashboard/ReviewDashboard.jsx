@@ -290,10 +290,10 @@ const normalizeOptionalAuditType = (value = "") => {
 const normalizeStatus = (value = "submitted") => String(value).toLowerCase().replaceAll("_", "-");
 const backendStatusFor = (status) => status.toUpperCase().replaceAll("-", "_");
 const isAuditorRole = (role = "") => String(role).includes("auditor");
-const auditorTypeForReportCategory = (value = "") => {
+function auditorTypeForReportCategory(value = "") {
   const category = normalizeUserRole(value);
   return ["internal", "external"].includes(category) ? category : "";
-};
+}
 const ACADEMIC_PART_E_SECTION_ID = "part-e-observations";
 const ACADEMIC_PART_E_FIELD_IDS = ["auditObservations", "auditRecommendations", "auditDocumentation"];
 const auditorSectionNumberFor = (auditType) => auditType === "academic" ? "E" : "F";
@@ -373,11 +373,12 @@ const reviewRemarksForDisplay = (submission = {}) => {
   if (remarks && (remarks === DEFAULT_AUDITOR_CORRECTION_MESSAGE || remarks === correctionMessage)) return "";
   return remarks;
 };
-const submittedAuditorAssignmentsForSubmission = (submission = {}) =>
-  (submission.auditorAssignments || []).filter((assignment) =>
+function submittedAuditorAssignmentsForSubmission(submission = {}) {
+  return (submission.auditorAssignments || []).filter((assignment) =>
     auditorAssignmentBelongsToSubmission(assignment, submission)
   );
-const auditorAssignmentsForCorrection = (submission = {}) => {
+}
+function auditorAssignmentsForCorrection(submission = {}) {
   const assignments = submittedAuditorAssignmentsForSubmission(submission);
   const targetType = normalizeUserRole(
     submission.forwardedAuditorType ||
@@ -388,7 +389,7 @@ const auditorAssignmentsForCorrection = (submission = {}) => {
     ? assignments.filter((assignment) => normalizeUserRole(assignment.auditorType) === targetType)
     : [];
   return matchingTypeAssignments.length ? matchingTypeAssignments : assignments;
-};
+}
 const allAuditorAssignmentsSubmitted = (submission = {}) => {
   const assignments = submittedAuditorAssignmentsForSubmission(submission);
   return assignments.length > 0 && assignments.every(auditorAssignmentSubmitted);
@@ -478,7 +479,9 @@ const booleanOrNull = (value) => {
   if (["false", "0", "no", "n"].includes(normalized)) return false;
   return null;
 };
-const normalizeUserRole = (value = "") => String(value).trim().toLowerCase().replaceAll("_", "-");
+function normalizeUserRole(value = "") {
+  return String(value).trim().toLowerCase().replaceAll("_", "-");
+}
 const contributorStageStatuses = new Set([
   "pending-contributor-submission",
   "external-contributor-pending",
@@ -805,7 +808,7 @@ const auditorAssignmentSubmitted = (assignment = {}) =>
     ["submitted", "completed", "auditor-completed", "approved"].includes(normalizeStatus(assignment.status)) ||
     Boolean(assignment.submittedAt)
   );
-const auditorAssignmentBelongsToSubmission = (assignment = {}, submission = {}) => {
+function auditorAssignmentBelongsToSubmission(assignment = {}, submission = {}) {
   const submissionAuditType = normalizeOptionalAuditType(submission.auditType || submission.type);
   if (!submissionAuditType) return true;
 
@@ -819,7 +822,7 @@ const auditorAssignmentBelongsToSubmission = (assignment = {}, submission = {}) 
   return assignmentSchools.some((school) =>
     school && (!submission.school || assignmentMatches(school, submission.school, schoolAliasesFor))
   );
-};
+}
 const normalizeAuditorAssignments = (submission = {}, values = {}) => {
   const progressSource = submission.auditorProgress;
   const progressHasAssignments = Array.isArray(progressSource) ||
