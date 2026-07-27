@@ -60,6 +60,15 @@ const responseList = (payload) => {
 const snapshotPayload = (entry = {}) => entry.submission || entry.snapshot || entry.data || entry;
 const normalizeStatus = (value = "") => String(value || "").trim().toLowerCase().replaceAll("_", "-");
 const normalizeCategory = (value = "") => String(value || "").trim().toLowerCase().replaceAll("_", "-");
+const compactAcademicYear = (value = "") => String(value || "")
+  .replace(/\s+/g, "")
+  .replace(/[–—]/g, "-")
+  .replace(/(\d{4})-(\d{2})(?!\d)/, (_, start, end) => `${start}-20${end}`);
+const draftBelongsToAcademicYear = (draft = {}, academicYear = "") => {
+  const expectedYear = compactAcademicYear(academicYear);
+  const draftYear = compactAcademicYear(draft.auditCycle || draft.cycleId || "");
+  return !draft.exists || !expectedYear || !draftYear || draftYear === expectedYear;
+};
 const normalizeHistoryDraft = (entry = {}, fallbackValues = {}, fallbackTables = {}) => {
   const normalized = normalizeDraft(snapshotPayload(entry), fallbackValues, fallbackTables);
   return {
@@ -292,15 +301,18 @@ export default function AuditForm({ schema, academicYear = schema.academicYear, 
       setStatus("");
 
       try {
-        const { data } = await fetchMyDraft(auditType);
+        const { data } = await fetchMyDraft(auditType, academicYear);
         const draft = normalizeDraft(data, initialValues, initialTables);
-        let historyEntries = responseList(draft.versionHistory).map((entry, index) =>
+        const activeDraft = draftBelongsToAcademicYear(draft, academicYear)
+          ? draft
+          : normalizeDraft({}, initialValues, initialTables);
+        let historyEntries = responseList(activeDraft.versionHistory).map((entry, index) =>
           normalizeHistoryDraft(entry, initialValues, initialTables, index)
         );
 
-        if (auditType === "academic" && draft.id) {
+        if (auditType === "academic" && activeDraft.id) {
           try {
-            const { data: snapshotsData } = await fetchSubmissionSnapshots(draft.id);
+            const { data: snapshotsData } = await fetchSubmissionSnapshots(activeDraft.id);
             historyEntries = [
               ...historyEntries,
               ...responseList(snapshotsData).map((entry, index) =>
@@ -313,12 +325,12 @@ export default function AuditForm({ schema, academicYear = schema.academicYear, 
         }
 
         if (!isActive) return;
-        setValues(draft.values);
-        setTables(draft.tables);
-        setAttachments(draft.attachments);
-        setHasExistingSubmission(draft.exists);
-        setIsSubmitted(draft.isSubmitted);
-        setAcademicPartEReview(auditType === "academic" ? buildAcademicPartEReview(draft, historyEntries) : null);
+        setValues(activeDraft.values);
+        setTables(activeDraft.tables);
+        setAttachments(activeDraft.attachments);
+        setHasExistingSubmission(activeDraft.exists);
+        setIsSubmitted(activeDraft.isSubmitted);
+        setAcademicPartEReview(auditType === "academic" ? buildAcademicPartEReview(activeDraft, historyEntries) : null);
       } catch (error) {
         if (isActive) setStatus(getApiErrorMessage(error, "Could not load your draft from the server."));
       } finally {
@@ -331,7 +343,7 @@ export default function AuditForm({ schema, academicYear = schema.academicYear, 
     return () => {
       isActive = false;
     };
-  }, [auditType, initialTables, initialValues]);
+  }, [academicYear, auditType, initialTables, initialValues]);
 
   const handleFieldChange = (fieldId, value) => {
     setValues((current) => ({ ...current, [fieldId]: value }));
@@ -363,7 +375,7 @@ export default function AuditForm({ schema, academicYear = schema.academicYear, 
     });
   };
 
-  const currentPayload = () => buildSubmissionPayload({ auditType, values, tables, attachments });
+  const currentPayload = () => buildSubmissionPayload({ auditType, values, tables, attachments, academicYear });
 
   const handleSaveDraft = async () => {
     setSavingDraft(true);
@@ -431,7 +443,7 @@ export default function AuditForm({ schema, academicYear = schema.academicYear, 
 
     try {
       const signedValues = withSubmitterSignOff(values, signOffProfileFromSession("director"));
-      await submitDraft(buildSubmissionPayload({ auditType, values: signedValues, tables, attachments }), { isUpdate: hasExistingSubmission });
+      await submitDraft(buildSubmissionPayload({ auditType, values: signedValues, tables, attachments, academicYear }), { isUpdate: hasExistingSubmission });
       setValues(signedValues);
       setHasExistingSubmission(true);
       setIsSubmitted(true);
