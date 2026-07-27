@@ -1269,6 +1269,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
   const [approvalCategory, setApprovalCategory] = useState("");
   const [correctionTarget, setCorrectionTarget] = useState(null);
   const [correctionMessage, setCorrectionMessage] = useState("");
+  const [correctionAssignmentKeys, setCorrectionAssignmentKeys] = useState([]);
   const [startingNextCycleId, setStartingNextCycleId] = useState("");
   const [downloadingAttachmentsId, setDownloadingAttachmentsId] = useState("");
   const [academicYear, setAcademicYear] = useState(
@@ -1610,12 +1611,14 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
       submission.auditorCorrectionMessage ||
       "Please rectify the auditor observations/recommendations and submit the review again."
     );
+    setCorrectionAssignmentKeys([]);
   };
 
   const closeCorrectionModal = () => {
     if (reviewingStatus === "auditor-correction") return;
     setCorrectionTarget(null);
     setCorrectionMessage("");
+    setCorrectionAssignmentKeys([]);
   };
 
   const returnToAuditorForCorrection = async () => {
@@ -1634,12 +1637,22 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
         submission.forwardedAuditorType ||
         auditorTypeForReportCategory(submission.reportCategory) ||
         "internal";
-      const correctionAssignments = auditorAssignmentsForCorrection(submission);
+      const selectableCorrectionAssignments = auditorAssignmentsForCorrection(submission);
+      const selectedCorrectionKeySet = new Set(correctionAssignmentKeys.map(String));
+      const correctionAssignments = selectableCorrectionAssignments.filter((assignment) =>
+        selectedCorrectionKeySet.has(String(assignment.key))
+      );
+      if (!correctionAssignments.length) {
+        setError("Select at least one auditor to return this review for correction.");
+        setReviewingStatus("");
+        return;
+      }
       const assignmentAuditorIds = correctionAssignments
         .map((assignment) => Number(assignment.auditorId))
         .filter((id) => Number.isSafeInteger(id) && id > 0);
       const assignmentAuditorNames = correctionAssignments.map((assignment) => assignment.auditorName).filter(Boolean);
       const assignmentAuditorEmails = correctionAssignments.map((assignment) => assignment.auditorEmail).filter(Boolean);
+      const selectedAssignmentKeys = correctionAssignments.map((assignment) => assignment.key).filter(Boolean);
       const fallbackAuditorIds = valueList(
         submission.forwardedToAuditorIds?.length
           ? submission.forwardedToAuditorIds
@@ -1697,6 +1710,10 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
         forwardedToAuditorIds,
         forwardedToAuditorNames,
         forwardedToAuditorEmails,
+        assignmentKeys: selectedAssignmentKeys,
+        auditorAssignmentKeys: selectedAssignmentKeys,
+        correctionAssignmentKeys: selectedAssignmentKeys,
+        returnedAuditorAssignmentKeys: selectedAssignmentKeys,
         ...(returnedAuditorAssignments.length ? {
           auditorAssignments: returnedAuditorAssignments,
           auditorProgress: returnedAuditorProgress,
@@ -1724,6 +1741,10 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
         forwardedToAuditorIds,
         forwardedToAuditorNames,
         forwardedToAuditorEmails,
+        assignmentKeys: selectedAssignmentKeys,
+        auditorAssignmentKeys: selectedAssignmentKeys,
+        correctionAssignmentKeys: selectedAssignmentKeys,
+        returnedAuditorAssignmentKeys: selectedAssignmentKeys,
         ...(returnedAuditorAssignments.length ? {
           auditorAssignments: returnedAuditorAssignments,
           auditorProgress: returnedAuditorProgress,
@@ -1741,6 +1762,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
       });
       setCorrectionTarget(null);
       setCorrectionMessage("");
+      setCorrectionAssignmentKeys([]);
     } catch (correctionError) {
       setError(getApiErrorMessage(correctionError, "Could not return this review to the auditor for correction."));
     } finally {
@@ -2297,6 +2319,8 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
             submission={correctionTarget}
             message={correctionMessage}
             onMessageChange={setCorrectionMessage}
+            selectedAssignmentKeys={correctionAssignmentKeys}
+            onSelectedAssignmentKeysChange={setCorrectionAssignmentKeys}
             returning={reviewingStatus === "auditor-correction"}
             onReturn={returnToAuditorForCorrection}
             onCancel={closeCorrectionModal}
@@ -4108,8 +4132,34 @@ function ApprovalCategoryModal({ submission, selectedCategory, onCategoryChange,
   );
 }
 
-function ReturnToAuditorModal({ submission, message, onMessageChange, returning, onReturn, onCancel }) {
+function ReturnToAuditorModal({
+  submission,
+  message,
+  onMessageChange,
+  selectedAssignmentKeys,
+  onSelectedAssignmentKeysChange,
+  returning,
+  onReturn,
+  onCancel,
+}) {
   const hasMessage = Boolean(message.trim());
+  const correctionAssignments = auditorAssignmentsForCorrection(submission);
+  const selectedKeySet = new Set(selectedAssignmentKeys.map(String));
+  const selectedAssignments = correctionAssignments.filter((assignment) => selectedKeySet.has(String(assignment.key)));
+  const allSelected = correctionAssignments.length > 0 && selectedAssignments.length === correctionAssignments.length;
+  const targetAuditorType = normalizeUserRole(
+    submission.forwardedAuditorType ||
+    auditorTypeForReportCategory(submission.reportCategory) ||
+    ""
+  );
+  const toggleAssignment = (assignmentKey) => {
+    const normalizedKey = String(assignmentKey);
+    onSelectedAssignmentKeysChange(
+      selectedKeySet.has(normalizedKey)
+        ? selectedAssignmentKeys.filter((key) => String(key) !== normalizedKey)
+        : [...selectedAssignmentKeys, normalizedKey]
+    );
+  };
 
   return (
     <div style={styles.modalBackdrop} onClick={returning ? undefined : onCancel}>
@@ -4132,8 +4182,88 @@ function ReturnToAuditorModal({ submission, message, onMessageChange, returning,
           <div style={styles.forwardStepHeading}>
             <span style={styles.forwardStepBadge}>1</span>
             <div>
+              <h4 style={styles.forwardStepTitle}>Choose auditors to return</h4>
+              <p style={styles.forwardStepHint}>
+                Select only the {targetAuditorType || "assigned"} auditor reviews that need correction.
+              </p>
+            </div>
+          </div>
+
+          {correctionAssignments.length ? (
+            <>
+              <div style={styles.forwardGroupSummary}>
+                <strong>{correctionAssignments.length} assigned auditor{correctionAssignments.length === 1 ? "" : "s"} available</strong>
+                <span>Only selected auditors will be able to edit and resubmit.</span>
+                <div style={styles.auditorSelectionTools}>
+                  <button
+                    type="button"
+                    style={styles.auditorSelectionButton}
+                    onClick={() => onSelectedAssignmentKeysChange(correctionAssignments.map((assignment) => assignment.key))}
+                    disabled={allSelected || returning}
+                  >
+                    Select All
+                  </button>
+                  <button
+                    type="button"
+                    style={styles.auditorSelectionButton}
+                    onClick={() => onSelectedAssignmentKeysChange([])}
+                    disabled={!selectedAssignments.length || returning}
+                  >
+                    Clear
+                  </button>
+                  <span>{selectedAssignments.length} selected</span>
+                </div>
+              </div>
+
+              <div style={styles.auditorList}>
+                {correctionAssignments.map((assignment, index) => {
+                  const isSelected = selectedKeySet.has(String(assignment.key));
+                  return (
+                    <label
+                      key={assignment.key || `${assignment.auditorEmail}-${index}`}
+                      style={{
+                        ...styles.auditorOption,
+                        ...(isSelected ? styles.selectedAuditorOption : {}),
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleAssignment(assignment.key)}
+                        disabled={returning}
+                        style={styles.auditorCheckbox}
+                      />
+                      <span style={styles.auditorAvatar}>{initialsFor(assignment.auditorName)}</span>
+                      <span style={styles.auditorOptionBody}>
+                        <strong>{assignment.auditorName}</strong>
+                        <small>{assignment.auditorEmail}</small>
+                        <small>
+                          {titleCase(assignment.auditorType || "Auditor")}
+                          {assignment.school ? ` - ${assignment.school}` : assignment.post ? ` - ${assignment.post}` : ""}
+                        </small>
+                      </span>
+                      <span style={styles.auditorAssignText}>
+                        {isSelected ? "Selected" : "Select"}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </>
+          ) : (
+            <div style={styles.forwardEmptyState}>
+              <strong>No auditor assignments found</strong>
+              <small>This review does not have explicit auditor assignments to return.</small>
+            </div>
+          )}
+        </div>
+
+        <div style={styles.forwardStep}>
+          <div style={styles.forwardStepHeading}>
+            <span style={styles.forwardStepBadge}>2</span>
+            <div>
               <h4 style={styles.forwardStepTitle}>Correction instructions</h4>
-              <p style={styles.forwardStepHint}>This sends the review back to the assigned auditor group for rectification.</p>
+              <p style={styles.forwardStepHint}>This message is shown only to the selected auditors.</p>
             </div>
           </div>
           <label style={styles.remarksLabel}>
@@ -4150,16 +4280,16 @@ function ReturnToAuditorModal({ submission, message, onMessageChange, returning,
         </div>
 
         <div style={styles.returnModalNotice}>
-          The Director or Administrative submitter will not be asked to resubmit. The auditor must submit again after correcting the review.
+          The Director or Administrative submitter will not be asked to resubmit. Only selected auditors must submit again after correcting the review.
         </div>
 
         <div style={styles.forwardFooter}>
           <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={returning}>
             Cancel
           </button>
-          <button type="button" style={styles.returnToggleButton} onClick={onReturn} disabled={!hasMessage || returning} aria-busy={returning}>
+          <button type="button" style={styles.returnToggleButton} onClick={onReturn} disabled={!hasMessage || !selectedAssignments.length || returning} aria-busy={returning}>
             {returning && <InlineSpinner label="Returning to auditor" />}
-            {returning ? "Returning..." : "Return to Auditor"}
+            {returning ? "Returning..." : `Return Selected (${selectedAssignments.length})`}
           </button>
         </div>
       </div>
