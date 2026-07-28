@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { getApiErrorMessage } from "../../api/client";
-import { login, requestPasswordReset } from "../../api/auth";
+import { login, verifyOtp, resendOtp, requestPasswordReset } from "../../api/auth";
 import { dashboardForRole, normalizeUserProfile } from "../../api/submissions";
 import { InlineSpinner } from "../../features/schoolAppraisal/components/LoadingState";
 import backgroundImage from "../../assets/images/dyp.jpeg";
@@ -21,6 +21,52 @@ export default function Login() {
   const [message, setMessage] = useState(location.state?.message || "");
   const [loading, setLoading] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
+
+  // MFA state
+  const [mfaRequired, setMfaRequired] = useState(false);
+  const [loginSessionId, setLoginSessionId] = useState("");
+  const [otpDigits, setOtpDigits] = useState(["", "", "", "", "", ""]);
+  const [otpLoading, setOtpLoading] = useState(false);
+  const [resendLoading, setResendLoading] = useState(false);
+  const [timer, setTimer] = useState(300);
+  const [resendCooldown, setResendCooldown] = useState(30);
+  const otpRefs = useRef([]);
+
+  useEffect(() => {
+    if (!mfaRequired) return;
+
+    const interval = setInterval(() => {
+      setTimer((prev) => (prev > 0 ? prev - 1 : 0));
+      setResendCooldown((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [mfaRequired]);
+
+  const formatTime = (secs) => {
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return `${m}:${s < 10 ? "0" : ""}${s}`;
+  };
+
+  const storeSessionAndNavigate = (profile, email) => {
+    sessionStorage.setItem("token", profile.token);
+    sessionStorage.setItem("userId", profile.id);
+    sessionStorage.setItem("email", profile.email || email);
+    sessionStorage.setItem("username", profile.email || email);
+    sessionStorage.setItem("name", profile.name);
+    sessionStorage.setItem("designation", profile.designation);
+    sessionStorage.setItem("school", profile.school);
+    sessionStorage.setItem("post", profile.post);
+    sessionStorage.setItem("administrativePosts", JSON.stringify(profile.administrativePosts || []));
+    sessionStorage.setItem("accountType", profile.accountType);
+    sessionStorage.setItem("category", profile.category);
+    sessionStorage.setItem("auditorType", profile.auditorType);
+    sessionStorage.setItem("auditorRole", profile.auditorRole);
+    if (profile.academicYear) sessionStorage.setItem("academicYear", profile.academicYear);
+    sessionStorage.setItem("role", profile.role);
+    navigate(dashboardForRole(profile.role), { replace: true });
+  };
 
   const handleLogin = async () => {
     const email = normalizeEmail(username);
@@ -45,33 +91,130 @@ export default function Login() {
 
     try {
       const { data } = await login(email, pw);
+
+      if (data?.mfaRequired) {
+        setMfaRequired(true);
+        setLoginSessionId(data.loginSessionId);
+        setTimer(data.expiresIn || 300);
+        setResendCooldown(30);
+        setOtpDigits(["", "", "", "", "", ""]);
+        setMessage("Verification code sent to your email address.");
+        setError("");
+        setPassword("");
+        return;
+      }
+
       const profile = normalizeUserProfile(data);
 
       if (!profile.token || !profile.role) {
         throw new Error("Login response is missing token or role.");
       }
 
-      sessionStorage.setItem("token", profile.token);
-      sessionStorage.setItem("userId", profile.id);
-      sessionStorage.setItem("email", profile.email || email);
-      sessionStorage.setItem("username", profile.email || email);
-      sessionStorage.setItem("name", profile.name);
-      sessionStorage.setItem("designation", profile.designation);
-      sessionStorage.setItem("school", profile.school);
-      sessionStorage.setItem("post", profile.post);
-      sessionStorage.setItem("administrativePosts", JSON.stringify(profile.administrativePosts || []));
-      sessionStorage.setItem("accountType", profile.accountType);
-      sessionStorage.setItem("category", profile.category);
-      sessionStorage.setItem("auditorType", profile.auditorType);
-      sessionStorage.setItem("auditorRole", profile.auditorRole);
-      if (profile.academicYear) sessionStorage.setItem("academicYear", profile.academicYear);
-      sessionStorage.setItem("role", profile.role);
-      navigate(dashboardForRole(profile.role), { replace: true });
+      storeSessionAndNavigate(profile, email);
     } catch (loginError) {
       setError(getApiErrorMessage(loginError, "Invalid email address or password."));
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleVerifyOtp = async (codeToVerify) => {
+    const code = codeToVerify || otpDigits.join("");
+    if (code.length !== 6) {
+      setError("Please enter the complete 6-digit verification code.");
+      return;
+    }
+
+    setOtpLoading(true);
+    setError("");
+    setMessage("");
+
+    try {
+      const { data } = await verifyOtp(loginSessionId, code);
+      const profile = normalizeUserProfile(data);
+
+      if (!profile.token || !profile.role) {
+        throw new Error("Verification response is missing token or role.");
+      }
+
+      storeSessionAndNavigate(profile, username);
+    } catch (verifyError) {
+      setError(getApiErrorMessage(verifyError, "Invalid verification code."));
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    if (resendCooldown > 0 || resendLoading) return;
+
+    setResendLoading(true);
+    setError("");
+    setMessage("");
+
+    try {
+      const { data } = await resendOtp(loginSessionId);
+      setResendCooldown(30);
+      setTimer(data?.expiresIn || 300);
+      setOtpDigits(["", "", "", "", "", ""]);
+      setMessage(data?.message || "Verification code resent successfully.");
+    } catch (resendError) {
+      setError(getApiErrorMessage(resendError, "Could not resend verification code."));
+    } finally {
+      setResendLoading(false);
+    }
+  };
+
+  const handleOtpDigitChange = (index, value) => {
+    if (!/^\d*$/.test(value)) return;
+
+    const newDigits = [...otpDigits];
+    newDigits[index] = value.slice(-1);
+    setOtpDigits(newDigits);
+
+    if (value && index < 5) {
+      otpRefs.current[index + 1]?.focus();
+    }
+
+    const fullCode = newDigits.join("");
+    if (fullCode.length === 6) {
+      handleVerifyOtp(fullCode);
+    }
+  };
+
+  const handleOtpDigitKeyDown = (index, e) => {
+    if (e.key === "Backspace" && !otpDigits[index] && index > 0) {
+      otpRefs.current[index - 1]?.focus();
+    } else if (e.key === "Enter") {
+      handleVerifyOtp();
+    }
+  };
+
+  const handleOtpPaste = (e) => {
+    e.preventDefault();
+    const pastedData = e.clipboardData.getData("text").trim().replace(/\D/g, "").slice(0, 6);
+    if (!pastedData) return;
+
+    const newDigits = ["", "", "", "", "", ""];
+    for (let i = 0; i < pastedData.length; i++) {
+      newDigits[i] = pastedData[i];
+    }
+    setOtpDigits(newDigits);
+
+    const focusIdx = Math.min(pastedData.length, 5);
+    otpRefs.current[focusIdx]?.focus();
+
+    if (pastedData.length === 6) {
+      handleVerifyOtp(pastedData);
+    }
+  };
+
+  const handleBackToLogin = () => {
+    setMfaRequired(false);
+    setLoginSessionId("");
+    setError("");
+    setMessage("");
+    setOtpDigits(["", "", "", "", "", ""]);
   };
 
   const handleKeyDown = (event) => {
@@ -213,61 +356,143 @@ export default function Login() {
           </div>
 
           <div className="school-login-right" style={s.right}>
-            <h2 style={s.panelTitle}>Welcome! Please login to continue.</h2>
+            {!mfaRequired ? (
+              <>
+                <h2 style={s.panelTitle}>Welcome! Please login to continue.</h2>
 
-            {error && <div style={s.error}>{error}</div>}
-            {message && <div style={s.success}>{message}</div>}
+                {error && <div style={s.error}>{error}</div>}
+                {message && <div style={s.success}>{message}</div>}
 
-            <input
-              className="dyp-input"
-              type="email"
-              placeholder="Enter email address"
-              value={username}
-              onChange={(event) => setUsername(event.target.value)}
-              onKeyDown={handleKeyDown}
-              autoComplete="email"
-              maxLength={254}
-            />
+                <input
+                  className="dyp-input"
+                  type="email"
+                  placeholder="Enter email address"
+                  value={username}
+                  onChange={(event) => setUsername(event.target.value)}
+                  onKeyDown={handleKeyDown}
+                  autoComplete="email"
+                  maxLength={254}
+                />
 
-            <div style={{ position: "relative", marginBottom: 2 }}>
-              <input
-                className="dyp-input"
-                style={{ marginBottom: 0, paddingRight: 52 }}
-                type={showPw ? "text" : "password"}
-                placeholder="Enter password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                onKeyDown={handleKeyDown}
-                autoComplete="current-password"
-              />
-              <button
-                type="button"
-                style={s.eyeBtn}
-                onClick={() => setShowPw((value) => !value)}
-                tabIndex={-1}
-                aria-label={showPw ? "Hide password" : "Show password"}
-              >
-                {showPw ? "Hide" : "Show"}
-              </button>
-            </div>
+                <div style={{ position: "relative", marginBottom: 2 }}>
+                  <input
+                    className="dyp-input"
+                    style={{ marginBottom: 0, paddingRight: 52 }}
+                    type={showPw ? "text" : "password"}
+                    placeholder="Enter password"
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    onKeyDown={handleKeyDown}
+                    autoComplete="current-password"
+                  />
+                  <button
+                    type="button"
+                    style={s.eyeBtn}
+                    onClick={() => setShowPw((value) => !value)}
+                    tabIndex={-1}
+                    aria-label={showPw ? "Hide password" : "Show password"}
+                  >
+                    {showPw ? "Hide" : "Show"}
+                  </button>
+                </div>
 
-            <div style={{ marginBottom: 16 }} />
+                <div style={{ marginBottom: 16 }} />
 
-            <button className="dyp-btn" type="button" onClick={handleLogin} disabled={loading} aria-busy={loading}>
-              {loading && <InlineSpinner label="Signing in" />}
-              {loading ? "Signing in..." : "Login"}
-            </button>
+                <button className="dyp-btn" type="button" onClick={handleLogin} disabled={loading} aria-busy={loading}>
+                  {loading && <InlineSpinner label="Signing in" />}
+                  {loading ? "Signing in..." : "Login"}
+                </button>
 
-            <button
-              className="dyp-forgot"
-              type="button"
-              onClick={handleForgotPassword}
-              disabled={resetLoading}
-              aria-busy={resetLoading}
-            >
-              {resetLoading && <InlineSpinner label="Sending reset link" />}
-              {resetLoading ? "Sending reset link..." : "Forgot password?"}
-            </button>
+                <button
+                  className="dyp-forgot"
+                  type="button"
+                  onClick={handleForgotPassword}
+                  disabled={resetLoading}
+                  aria-busy={resetLoading}
+                >
+                  {resetLoading && <InlineSpinner label="Sending reset link" />}
+                  {resetLoading ? "Sending reset link..." : "Forgot password?"}
+                </button>
+              </>
+            ) : (
+              <>
+                <h2 style={s.panelTitle}>Verify your identity</h2>
+                <p style={{ fontSize: 13, color: "rgba(255,255,255,0.72)", marginTop: -14, marginBottom: 18, lineHeight: 1.4 }}>
+                  Enter the 6-digit code sent to: <strong>{username}</strong>
+                </p>
+
+                {error && <div style={s.error}>{error}</div>}
+                {message && <div style={s.success}>{message}</div>}
+
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 6,
+                    justifyContent: "center",
+                    marginBottom: 16
+                  }}
+                  onPaste={handleOtpPaste}
+                >
+                  {otpDigits.map((digit, idx) => (
+                    <input
+                      key={idx}
+                      ref={(el) => (otpRefs.current[idx] = el)}
+                      className="dyp-input"
+                      style={{
+                        width: 38,
+                        height: 44,
+                        textAlign: "center",
+                        fontSize: 18,
+                        fontWeight: "bold",
+                        marginBottom: 0,
+                        padding: 0
+                      }}
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={1}
+                      value={digit}
+                      onChange={(e) => handleOtpDigitChange(idx, e.target.value)}
+                      onKeyDown={(e) => handleOtpDigitKeyDown(idx, e)}
+                      disabled={otpLoading || timer === 0}
+                      autoFocus={idx === 0}
+                    />
+                  ))}
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, fontSize: 12, color: "rgba(255,255,255,0.72)" }}>
+                  <span>{timer > 0 ? `Expires in ${formatTime(timer)}` : "Code expired"}</span>
+                  <button
+                    type="button"
+                    className="dyp-forgot"
+                    style={{ width: "auto", fontSize: 12, color: resendCooldown > 0 ? "rgba(255,255,255,0.4)" : "#60a5fa" }}
+                    onClick={handleResendOtp}
+                    disabled={resendCooldown > 0 || resendLoading}
+                  >
+                    {resendLoading ? "Resending..." : resendCooldown > 0 ? `Resend in ${resendCooldown}s` : "Resend Code"}
+                  </button>
+                </div>
+
+                <button
+                  className="dyp-btn"
+                  type="button"
+                  onClick={() => handleVerifyOtp()}
+                  disabled={otpLoading || otpDigits.join("").length !== 6 || timer === 0}
+                  aria-busy={otpLoading}
+                >
+                  {otpLoading && <InlineSpinner label="Verifying code" />}
+                  {otpLoading ? "Verifying..." : "Verify Code"}
+                </button>
+
+                <button
+                  className="dyp-forgot"
+                  type="button"
+                  onClick={handleBackToLogin}
+                  disabled={otpLoading}
+                >
+                  Back to Login
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>
