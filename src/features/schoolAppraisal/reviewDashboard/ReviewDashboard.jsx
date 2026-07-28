@@ -1915,7 +1915,13 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
         resetActiveForms: true,
       });
       const confirmedYear = normalizeAcademicYear(
-        data?.data?.academicYear || data?.academicYear || nextAcademicYear,
+        data?.data?.academicYear ||
+        data?.data?.nextAcademicYear ||
+        data?.data?.currentAcademicYear ||
+        data?.academicYear ||
+        data?.nextAcademicYear ||
+        data?.currentAcademicYear ||
+        nextAcademicYear,
       );
       sessionStorage.setItem("academicYear", confirmedYear);
       setAcademicYear(confirmedYear);
@@ -2677,6 +2683,7 @@ function PreviousReportsPanel({
   downloadingAttachmentsId,
 }) {
   const [activeAuditType, setActiveAuditType] = useState("all");
+  const [reportSubmission, setReportSubmission] = useState(null);
   const currentYear = compactAcademicYear(academicYear);
   const availableYears = useMemo(() => {
     const years = new Set([currentYear]);
@@ -2698,6 +2705,18 @@ function PreviousReportsPanel({
   const sectionTitle = activeAuditType === "all"
     ? "All Audit Reports"
     : `${titleCase(activeAuditType)} Audit Reports`;
+  const showingHistoricalYear = selectedYear !== currentYear;
+
+  if (reportSubmission) {
+    return (
+      <PreviousReportOnlyView
+        submission={reportSubmission}
+        onBack={() => setReportSubmission(null)}
+        onDownload={() => onDownload(reportSubmission)}
+        downloadingAttachments={downloadingAttachmentsId === reportSubmission.id}
+      />
+    );
+  }
 
   return (
     <section style={styles.panel}>
@@ -2759,6 +2778,8 @@ function PreviousReportsPanel({
             startingNextCycleId={startingNextCycleId}
             onDownload={onDownload}
             downloadingAttachmentsId={downloadingAttachmentsId}
+            onGenerateReport={setReportSubmission}
+            reportOnly={showingHistoricalYear}
           />
         </div>
       )}
@@ -2774,6 +2795,8 @@ function PreviousReportAuditSection({
   startingNextCycleId,
   onDownload,
   downloadingAttachmentsId,
+  onGenerateReport,
+  reportOnly = false,
 }) {
   const [activeCategory, setActiveCategory] = useState("internal");
   const categoryTabs = [
@@ -2814,17 +2837,19 @@ function PreviousReportAuditSection({
         )}
         {filteredReports.map((submission) => {
           const canStartNextCycle =
+            !reportOnly &&
             activeCategory === "internal" &&
             !submission.hasNextCycle;
           return (
             <SubmissionCard
               key={`${submission.auditType}-${submission.id}`}
               submission={submission}
-              onOpen={() => onOpen(submission)}
+              onOpen={reportOnly ? null : () => onOpen(submission)}
               onStartNextCycle={canStartNextCycle ? () => onStartNextCycle(submission) : null}
               startingNextCycle={startingNextCycleId === submission.id}
               onDownload={() => onDownload(submission)}
               downloadingAttachments={downloadingAttachmentsId === submission.id}
+              onGenerateReport={reportOnly ? () => onGenerateReport(submission) : null}
             />
           );
         })}
@@ -2841,6 +2866,7 @@ function SubmissionCard({
   startingNextCycle,
   onDownload,
   downloadingAttachments,
+  onGenerateReport,
 }) {
   const forwardedAuditorCount = submission.forwardedToAuditorNames?.length || submission.forwardedToAuditorIds?.length || 0;
   return (
@@ -2915,9 +2941,83 @@ function SubmissionCard({
             {downloadingAttachments ? "Preparing ZIP..." : "Download Attachments"}
           </button>
         )}
-        <button type="button" className="btn btn-secondary" onClick={onOpen}>View Form</button>
+        {onGenerateReport && (
+          <button type="button" className="btn btn-primary" onClick={onGenerateReport}>
+            Generate Report
+          </button>
+        )}
+        {onOpen && <button type="button" className="btn btn-secondary" onClick={onOpen}>View Form</button>}
       </div>
     </article>
+  );
+}
+
+function PreviousReportOnlyView({ submission, onBack, onDownload, downloadingAttachments }) {
+  const previousInternalReport = (submission.versionHistory || [])
+    .filter((entry) =>
+      (
+        String(entry.reportCategory || "").toLowerCase() === "internal" ||
+        (
+          String(submission.reportCategory || "").toLowerCase() === "external" &&
+          Number(entry.version || 0) < Number(submission.version || 0)
+        )
+      ) &&
+      (getSubmissionAuditorSignOff(entry).name || hasAcademicPartEValues(entry.values))
+    )
+    .sort((first, second) => Number(second.version || 0) - Number(first.version || 0))[0];
+  const previousInternalAuditor = getSubmissionAuditorSignOff(previousInternalReport);
+  const currentAuditor = getSubmissionAuditorSignOff(submission);
+
+  return (
+    <section style={styles.fullReviewPage}>
+      <div className="review-report-actions" style={styles.cardActions}>
+        <button type="button" className="btn btn-secondary" onClick={onBack}>Back</button>
+        {onDownload && (
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={onDownload}
+            disabled={downloadingAttachments}
+            aria-busy={downloadingAttachments}
+          >
+            {downloadingAttachments && <InlineSpinner label="Preparing attachment archive" />}
+            {downloadingAttachments ? "Preparing ZIP..." : "Download Attachments"}
+          </button>
+        )}
+        <button type="button" className="btn btn-primary" onClick={() => window.print()}>Print Report</button>
+      </div>
+      {submission.auditType === "academic" ? (
+        <AuditReportPanel
+          schema={academicAudit2025Schema}
+          values={submission.values}
+          tables={submission.tables}
+          submissionSchool={submission.school}
+          reportCategory={submission.reportCategory}
+          auditorAssignments={submission.auditorAssignments || []}
+          currentAuditor={currentAuditor}
+          previousInternalAuditor={previousInternalAuditor}
+          previousInternalValues={previousInternalReport?.values}
+          iqacRemarks={submission.remarks}
+          previousInternalMeta={
+            previousInternalReport
+              ? `${titleCase(previousInternalReport.reportCategory || "internal")} Audit - ${previousInternalReport.auditCycle} - V${previousInternalReport.version}`
+              : ""
+          }
+        />
+      ) : (
+        <AdministrativeReportPanel
+          meta={administrativeAuditMeta}
+          modules={administrativeAuditModules}
+          data={{ fields: submission.values, tables: submission.tables }}
+          reportCategory={submission.reportCategory}
+          auditorAssignments={submission.auditorAssignments || []}
+          currentAuditor={currentAuditor}
+          previousInternalAuditor={previousInternalAuditor}
+          iqacRemarks={submission.remarks}
+          onClose={onBack}
+        />
+      )}
+    </section>
   );
 }
 

@@ -46,6 +46,15 @@ const ADMIN_STATUS_ROLES = [
 
 const statusRoleForPost = (post) => ADMIN_STATUS_ROLES.find((role) => role.post === post);
 const titleCase = (value = "") => String(value).replaceAll("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+const compactAcademicYear = (value = "") => String(value || "")
+  .replace(/\s+/g, "")
+  .replace(/[–—]/g, "-")
+  .replace(/(\d{4})-(\d{2})(?!\d)/, (_, start, end) => `${start}-20${end}`);
+const draftBelongsToAcademicYear = (draft = {}, academicYear = "") => {
+  const expectedYear = compactAcademicYear(academicYear);
+  const draftYear = compactAcademicYear(draft.auditCycle || draft.cycleId || "");
+  return !draft.exists || !expectedYear || !draftYear || draftYear === expectedYear;
+};
 const isLockedContributionStatus = (status = "") => ["approved", "submitted", "auditor-completed"].includes(String(status).toLowerCase().replaceAll("_", "-"));
 const editableContributionStatuses = new Set([
   "pending",
@@ -277,23 +286,26 @@ export default function AdministrativeAuditDashboard() {
 
       try {
         const initial = buildInitialData();
-        const { data: draftResponse } = await fetchMyDraft("administrative");
+        const { data: draftResponse } = await fetchMyDraft("administrative", academicYear);
         const draft = normalizeDraft(draftResponse, initial.fields, initial.tables);
+        const activeDraft = draftBelongsToAcademicYear(draft, academicYear)
+          ? draft
+          : normalizeDraft({}, initial.fields, initial.tables);
 
         if (!isActive) return;
         setData({
-          fields: draft.values,
-          tables: ensureDefaultTableRows(draft.tables),
-          attachments: draft.attachments,
+          fields: activeDraft.values,
+          tables: ensureDefaultTableRows(activeDraft.tables),
+          attachments: activeDraft.attachments,
           lastSavedAt: new Date().toISOString(),
         });
-        setHasExistingSubmission(draft.exists);
-        setIsSubmitted(draft.isSubmitted);
-        setWorkflow(workflowFromDraft(draft));
-        setAdministrativeProgress(draft.administrativeProgress || {});
+        setHasExistingSubmission(activeDraft.exists);
+        setIsSubmitted(activeDraft.isSubmitted);
+        setWorkflow(workflowFromDraft(activeDraft));
+        setAdministrativeProgress(activeDraft.administrativeProgress || {});
         const contributionStatus = String(
-          draft.administrativeProgress?.[currentStatusRole?.key] ||
-          draft.administrativeProgress?.[userPost] ||
+          activeDraft.administrativeProgress?.[currentStatusRole?.key] ||
+          activeDraft.administrativeProgress?.[userPost] ||
           "",
         ).toLowerCase();
         setContributionApproved(["approved", "submitted"].includes(contributionStatus));
@@ -309,7 +321,7 @@ export default function AdministrativeAuditDashboard() {
     return () => {
       isActive = false;
     };
-  }, [currentStatusRole?.key, userPost]);
+  }, [academicYear, currentStatusRole?.key, userPost]);
 
   useEffect(() => {
     if (!reportMode || !printReportAfterRender) return undefined;
@@ -437,10 +449,13 @@ export default function AdministrativeAuditDashboard() {
         values: scopedValues,
         tables: scopedTables,
         attachments: uniqueAttachments({ fields: scopedValues, tables: scopedTables }),
+        academicYear,
       }),
       sharedAdministrativeForm: true,
       contributorPost: userPost,
-      cycleId: workflow.cycleId || undefined,
+      academicYear,
+      auditCycle: academicYear,
+      cycleId: workflow.cycleId || academicYear,
       cycleType: workflow.cycleType || undefined,
       reportCategory: workflow.reportCategory || undefined,
       version: workflow.version || undefined,

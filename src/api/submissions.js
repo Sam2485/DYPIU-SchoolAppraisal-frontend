@@ -257,17 +257,23 @@ export const extractAttachments = (tables) => {
   return attachments;
 };
 
-export const buildSubmissionPayload = ({ auditType, values, tables, attachments }) => ({
+export const buildSubmissionPayload = ({ auditType, values, tables, attachments, academicYear }) => ({
   auditType,
+  ...(academicYear ? {
+    academicYear,
+    auditCycle: academicYear,
+    cycleId: academicYear,
+  } : {}),
   valuesData: JSON.stringify(values || {}),
   tablesData: JSON.stringify(tables || {}),
   attachments: JSON.stringify(attachments || extractAttachments(tables)),
 });
 
-export const fetchMyDraft = (auditType) =>
+export const fetchMyDraft = (auditType, academicYear) =>
   apiClient.get("/api/submissions/my-draft", {
     params: {
       auditType,
+      ...(academicYear ? { academicYear, auditCycle: academicYear, cycleId: academicYear } : {}),
       ...(auditType === "administrative" ? { shared: true } : {}),
     },
   });
