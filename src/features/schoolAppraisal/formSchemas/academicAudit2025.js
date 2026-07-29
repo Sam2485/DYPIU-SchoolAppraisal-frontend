@@ -27,7 +27,7 @@ export const academicAudit2025Schema = {
         {
           id: "studentStrength",
           title: "Student's Strength",
-          columns: ["Class", "No. of Student", "Total"],
+          columns: ["Class", "Sanctioned Intake", "No. of Students Admitted"],
         },
         {
           id: "facultyStrength",
