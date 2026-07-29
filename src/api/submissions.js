@@ -218,7 +218,7 @@ export const normalizeDraft = (payload = {}, fallbackValues = {}, fallbackTables
       ...fallbackTables,
       ...safeJsonParse(tablesData, {}),
     },
-    attachments: safeJsonParse(draft.attachments, []),
+    attachments: extractAllUniqueAttachments(draft.attachments, tablesData, valuesData),
     auditorAssignments: safeJsonParse(draft.auditorAssignments || draft.auditorReviews || draft.assignments, []),
     versionHistory: safeJsonParse(draft.versionHistory || draft.previousVersions || draft.snapshots, []),
     remarks: draft.remarks || draft.iqacRemarks || draft.reviewRemarks || "",
@@ -229,6 +229,51 @@ export const normalizeDraft = (payload = {}, fallbackValues = {}, fallbackTables
     auditorReviewedByEmail: draft.auditorReviewedByEmail || draft.auditorEmail || "",
     auditorReviewedOn: draft.auditorReviewedOn || draft.auditedOn || "",
   };
+};
+
+export const extractAllUniqueAttachments = (attachmentsPayload, tablesData, valuesData) => {
+  const list = [];
+  const seen = new Set();
+
+  const addAttachment = (item) => {
+    if (!item || typeof item !== "object") return;
+    const url = item.url || item.publicUrl || item.downloadUrl || "";
+    const fileName = item.fileName || item.filename || item.name || "";
+    if (!url && !fileName) return;
+
+    const key = (url || fileName).trim().toLowerCase();
+    if (key && seen.has(key)) return;
+    if (key) seen.add(key);
+
+    list.push({
+      name: fileName || "Attachment",
+      fileName: fileName || "Attachment",
+      url: url || "",
+      ...item,
+    });
+  };
+
+  const processNode = (node) => {
+    if (!node) return;
+    if (Array.isArray(node)) {
+      node.forEach(processNode);
+    } else if (typeof node === "object") {
+      if (node.url || node.publicUrl || node.downloadUrl || node.fileName || node.filename) {
+        addAttachment(node);
+      }
+      Object.values(node).forEach(processNode);
+    }
+  };
+
+  const rawAttachments = safeJsonParse(attachmentsPayload, []);
+  if (Array.isArray(rawAttachments)) {
+    rawAttachments.forEach(addAttachment);
+  }
+
+  processNode(safeJsonParse(tablesData, {}));
+  processNode(safeJsonParse(valuesData, {}));
+
+  return list;
 };
 
 export const extractAttachments = (tables) => {
