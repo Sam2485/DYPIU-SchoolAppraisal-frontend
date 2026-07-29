@@ -408,9 +408,15 @@ export const submitAdministrativePart = (cycleId) =>
 export const fetchAdministrativeStatus = (cycleId) =>
   apiClient.get(`/api/submissions/administrative/${encodeURIComponent(cycleId)}/status`);
 
-export const parseSubmissionFormData = (submission = {}) => ({
-  values: safeJsonParse(submission.valuesData ?? submission.values ?? submission.fieldsData ?? submission.fields, {}),
-  tables: safeJsonParse(submission.tablesData ?? submission.tables, {}),
-  attachments: safeJsonParse(submission.attachments, []),
-  hasSavedData: Boolean(submission.valuesData || submission.values || submission.fieldsData || submission.fields || submission.tablesData || submission.tables),
-});
+export const parseSubmissionFormData = (submission = {}) => {
+  const values = safeJsonParse(submission.valuesData ?? submission.values ?? submission.fieldsData ?? submission.fields, {});
+  const tables = safeJsonParse(submission.tablesData ?? submission.tables, {});
+  const attachments = extractAllUniqueAttachments(submission.attachments, submission.tablesData, submission.valuesData);
+
+  return {
+    values,
+    tables,
+    attachments,
+    hasSavedData: Boolean(submission.valuesData || submission.values || submission.fieldsData || submission.fields || submission.tablesData || submission.tables),
+  };
+};
