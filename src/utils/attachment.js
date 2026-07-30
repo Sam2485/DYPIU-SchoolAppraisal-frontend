@@ -8,10 +8,17 @@ export const getAttachmentUrl = (url) => {
   let resolvedUrl = url;
 
   // Translate legacy GCP storage URLs to local VM upload paths if present in imported records
-  if (typeof resolvedUrl === "string" && resolvedUrl.startsWith("https://storage.googleapis.com/")) {
-    const match = resolvedUrl.match(/https:\/\/storage\.googleapis\.com\/[^/]+\/(.+)/);
-    if (match && match[1]) {
-      resolvedUrl = "/uploads/" + match[1];
+  if (typeof resolvedUrl === "string") {
+    if (resolvedUrl.startsWith("https://storage.googleapis.com/")) {
+      const match = resolvedUrl.match(/https:\/\/storage\.googleapis\.com\/[^/]+\/(.+)/);
+      if (match && match[1]) {
+        resolvedUrl = "/uploads/" + match[1];
+      }
+    }
+    if (resolvedUrl.startsWith("users/")) {
+      resolvedUrl = "/uploads/" + resolvedUrl;
+    } else if (resolvedUrl.startsWith("/users/")) {
+      resolvedUrl = "/uploads" + resolvedUrl;
     }
   }
 
