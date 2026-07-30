@@ -24,6 +24,69 @@ export const normalizeRole = (role = "") => String(role).trim().toLowerCase().re
 
 export const SIGN_OFF_FIELD = "__auditSignOff";
 
+export const normalizeAcademicYearForApi = (value = "") => {
+  const match = String(value || "").match(/(\d{4})\D+(\d{2,4})/);
+  if (!match) return String(value || "");
+
+  const startYear = Number(match[1]);
+  const endYear = match[2].length === 2
+    ? Number(`${String(startYear).slice(0, 2)}${match[2]}`)
+    : Number(match[2]);
+
+  return `${startYear}-${endYear}`;
+};
+
+const compactAcademicYear = (value = "") => {
+  const normalized = normalizeAcademicYearForApi(value);
+  const match = normalized.match(/(\d{4})-(\d{4})/);
+  return match ? `${match[1]}-${match[2].slice(-2)}` : normalized;
+};
+
+const uniqueAcademicYearAliases = (academicYear) => {
+  if (!academicYear) return [];
+  return [...new Set([
+    normalizeAcademicYearForApi(academicYear),
+    compactAcademicYear(academicYear),
+    String(academicYear),
+  ].filter(Boolean))];
+};
+
+const academicYearParams = (academicYear) => ({
+  academicYear,
+  auditCycle: academicYear,
+  cycleId: academicYear,
+});
+
+const historicalDraftParams = {
+  includeSubmitted: true,
+  includeApproved: true,
+  includeReviewed: true,
+  includeHistorical: true,
+  historical: true,
+  readOnly: true,
+  status: "all",
+};
+
+const responseHasDraftData = (payload) => {
+  if (Array.isArray(payload)) return payload.some(responseHasDraftData);
+  if (!payload || typeof payload !== "object") return false;
+
+  const candidate = payload.submission ?? payload.draft ?? payload.data ?? payload;
+  if (candidate && candidate !== payload) return responseHasDraftData(candidate);
+
+  return Boolean(
+    candidate.id ||
+    candidate.submissionId ||
+    candidate.valuesData ||
+    candidate.values ||
+    candidate.fieldsData ||
+    candidate.fields ||
+    candidate.tablesData ||
+    candidate.tables ||
+    candidate.attachments
+  );
+};
+
 const normalizeListValue = (value) => {
   if (Array.isArray(value)) return value.filter(Boolean);
   if (!value) return [];
@@ -319,13 +382,43 @@ export const buildSubmissionPayload = ({ auditType, values, tables, attachments,
 });
 
 export const fetchMyDraft = (auditType, academicYear) =>
+  fetchMyDraftForAcademicYearAliases(auditType, academicYear);
+
+const fetchMyDraftVariant = (auditType, yearAlias, sharedParams, extraParams = {}) =>
   apiClient.get("/api/submissions/my-draft", {
     params: {
       auditType,
-      ...(academicYear ? { academicYear, auditCycle: academicYear, cycleId: academicYear } : {}),
-      ...(auditType === "administrative" ? { shared: true } : {}),
+      ...(yearAlias ? academicYearParams(yearAlias) : {}),
+      ...sharedParams,
+      ...extraParams,
     },
   });
+
+const fetchMyDraftForAcademicYearAliases = async (auditType, academicYear) => {
+  const yearAliases = uniqueAcademicYearAliases(academicYear);
+  const sharedParams = auditType === "administrative" ? { shared: true } : {};
+
+  if (!yearAliases.length) {
+    return fetchMyDraftVariant(auditType, "", sharedParams);
+  }
+
+  let fallbackResponse;
+  for (const yearAlias of yearAliases) {
+    const response = await fetchMyDraftVariant(auditType, yearAlias, sharedParams);
+    fallbackResponse = fallbackResponse || response;
+    if (responseHasDraftData(response.data)) return response;
+  }
+
+  if (auditType === "academic") {
+    for (const yearAlias of yearAliases) {
+      const response = await fetchMyDraftVariant(auditType, yearAlias, sharedParams, historicalDraftParams);
+      fallbackResponse = fallbackResponse || response;
+      if (responseHasDraftData(response.data)) return response;
+    }
+  }
+
+  return fallbackResponse;
+};
 
 export const saveDraft = (payload, { isUpdate = false } = {}) =>
   apiClient.request({

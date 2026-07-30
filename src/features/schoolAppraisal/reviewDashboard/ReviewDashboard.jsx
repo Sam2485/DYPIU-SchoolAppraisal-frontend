@@ -1378,7 +1378,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
         const selected = stored ? compactAcademicYear(stored) : compactAcademicYear(activeLabel);
         setAcademicYear(normalizeAcademicYear(selected));
         sessionStorage.setItem("academicYear", selected);
-      } catch (e) {
+      } catch {
         // Fallback
       }
     };
