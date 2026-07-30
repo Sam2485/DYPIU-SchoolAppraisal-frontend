@@ -405,6 +405,18 @@ export default function AuditForm({
   };
 
   const handleSaveAndNext = async () => {
+    const sectionIds = schema.sections.map((section) => section.id);
+    const currentIndex = sectionIds.indexOf(activeSectionId);
+    const nextSectionId = sectionIds[Math.min(currentIndex + 1, sectionIds.length - 1)];
+
+    if (readOnly) {
+      if (nextSectionId && nextSectionId !== activeSectionId) {
+        onSectionChange?.(nextSectionId);
+        scrollPageToTop();
+      }
+      return;
+    }
+
     setSavingDraft(true);
     setStatus("");
 
@@ -412,10 +424,6 @@ export default function AuditForm({
       await saveDraft(currentPayload(), { isUpdate: hasExistingSubmission });
       setHasExistingSubmission(true);
       setStatus("Draft saved successfully.");
-
-      const sectionIds = schema.sections.map((section) => section.id);
-      const currentIndex = sectionIds.indexOf(activeSectionId);
-      const nextSectionId = sectionIds[Math.min(currentIndex + 1, sectionIds.length - 1)];
 
       if (nextSectionId && nextSectionId !== activeSectionId) {
         onSectionChange?.(nextSectionId);
@@ -589,7 +597,7 @@ export default function AuditForm({
           ))}
       </div>
 
-      {isLastSection && !isSubmitted && (
+      {isLastSection && !readOnly && (
         <SubmissionConfirmation
           value={submissionConfirmation}
           onChange={setSubmissionConfirmation}
@@ -603,7 +611,7 @@ export default function AuditForm({
             <button type="button" className="btn btn-secondary" onClick={handleGenerateReport}>
               Generate Report
             </button>
-            {!isSubmitted && (
+            {!readOnly && (
               <button type="button" className="btn btn-primary" onClick={handleSubmit} disabled={submitting || !canSubmit} aria-busy={submitting}>
                 {submitting && <InlineSpinner label="Submitting form" />}
                 {submitting ? "Submitting..." : "Submit"}
@@ -611,9 +619,9 @@ export default function AuditForm({
             )}
           </>
         ) : (
-          <button type="button" className="btn btn-primary" onClick={handleSaveAndNext} disabled={readOnly || savingDraft || loadingDraft} aria-busy={savingDraft}>
+          <button type="button" className="btn btn-primary" onClick={handleSaveAndNext} disabled={savingDraft || loadingDraft} aria-busy={savingDraft}>
             {savingDraft && <InlineSpinner label="Saving section" />}
-            {savingDraft ? "Saving..." : "Save & Next"}
+            {savingDraft ? "Saving..." : (readOnly ? "Next" : "Save & Next")}
           </button>
         )}
       </div>

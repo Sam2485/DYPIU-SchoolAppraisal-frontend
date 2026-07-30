@@ -523,7 +523,17 @@ export default function AdministrativeAuditDashboard() {
   };
 
   const saveAndGoNext = async () => {
-    if (readOnly) return;
+    const moduleIds = administrativeUserModules.map((module) => module.id);
+    const currentIndex = moduleIds.indexOf(activeModuleId);
+    const nextModuleId = moduleIds[Math.min(currentIndex + 1, moduleIds.length - 1)];
+
+    if (readOnly) {
+      if (nextModuleId && nextModuleId !== activeModuleId) {
+        handleModuleChange(nextModuleId);
+      }
+      return;
+    }
+
     setSavingDraft(true);
     setSavingDraftAction("next");
     setStatus("");
@@ -533,15 +543,10 @@ export default function AdministrativeAuditDashboard() {
       setData(nextData);
       await saveDraft(currentPayload(), { isUpdate: hasExistingSubmission });
       setHasExistingSubmission(true);
-      setStatus("Draft saved successfully.");
-
-      const moduleIds = administrativeUserModules.map((module) => module.id);
-      const currentIndex = moduleIds.indexOf(activeModuleId);
-      const nextModuleId = moduleIds[Math.min(currentIndex + 1, moduleIds.length - 1)];
+      setStatus(`Section ${activeModule.number || activeModule.title} draft saved successfully.`);
 
       if (nextModuleId && nextModuleId !== activeModuleId) {
-        setActiveModuleId(nextModuleId);
-        scrollPageToTop();
+        handleModuleChange(nextModuleId);
       }
     } catch (error) {
       setStatus(getApiErrorMessage(error, "Could not save draft."));
@@ -852,13 +857,15 @@ export default function AdministrativeAuditDashboard() {
                 ) : null
               ) : (
                 <>
-                  <button type="button" className="btn btn-secondary" onClick={saveCurrentSection} disabled={readOnly || savingDraft || loadingDraft} aria-busy={savingDraft}>
-                    {savingDraftAction === "draft" && <InlineSpinner label="Saving section" />}
-                    {savingDraftAction === "draft" ? "Saving..." : "Save Draft"}
-                  </button>
-                  <button type="button" className="btn btn-primary" onClick={saveAndGoNext} disabled={readOnly || savingDraft || loadingDraft} aria-busy={savingDraft}>
+                  {!readOnly && (
+                    <button type="button" className="btn btn-secondary" onClick={saveCurrentSection} disabled={readOnly || savingDraft || loadingDraft} aria-busy={savingDraft}>
+                      {savingDraftAction === "draft" && <InlineSpinner label="Saving section" />}
+                      {savingDraftAction === "draft" ? "Saving..." : "Save Draft"}
+                    </button>
+                  )}
+                  <button type="button" className="btn btn-primary" onClick={saveAndGoNext} disabled={savingDraft || loadingDraft} aria-busy={savingDraft}>
                     {savingDraftAction === "next" && <InlineSpinner label="Saving section" />}
-                    {savingDraftAction === "next" ? "Saving..." : "Save & Next"}
+                    {savingDraftAction === "next" ? "Saving..." : (readOnly ? "Next" : "Save & Next")}
                   </button>
                 </>
               )}
