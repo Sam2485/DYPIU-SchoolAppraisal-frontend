@@ -1,18 +1,55 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import AuditForm from "../../features/schoolAppraisal/components/AuditForm";
 import AppSidebar from "../../features/schoolAppraisal/components/AppSidebar";
 import { academicAudit2025Schema } from "../../features/schoolAppraisal/formSchemas";
 import { scrollPageToTop } from "../../utils/scrollToTop";
+import { fetchCurrentAuditCycle } from "../../api/submissions";
 
 const directorAuditSchema = academicAudit2025Schema;
+const compactYear = (str = "") => {
+  const match = String(str).match(/(\d{4})\D+(\d{2,4})/);
+  if (!match) return "2025-26";
+  const start = match[1];
+  const end = match[2].slice(-2);
+  return `${start}-${end}`;
+};
 
 export default function DirectorDashboard() {
   const navigate = useNavigate();
-  const academicYear = sessionStorage.getItem("academicYear") || directorAuditSchema.academicYear;
+  const [academicYear, setAcademicYear] = useState(
+    sessionStorage.getItem("academicYear") ? compactYear(sessionStorage.getItem("academicYear")) : "2025-26"
+  );
+  const [availableYears, setAvailableYears] = useState(["2025-26", "2026-27"]);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [activeSectionId, setActiveSectionId] = useState(directorAuditSchema.sections[0].id);
   const [reportMode, setReportMode] = useState(false);
+
+  useEffect(() => {
+    let isActive = true;
+    const loadCycles = async () => {
+      try {
+        const { data } = await fetchCurrentAuditCycle();
+        if (!isActive) return;
+        const activeLabel = data.activeYear || "2025-2026";
+        const rawYears = data.availableYears || [activeLabel];
+        const formatted = Array.from(new Set(rawYears.map(compactYear))).sort();
+        setAvailableYears(formatted);
+
+        const stored = sessionStorage.getItem("academicYear");
+        const selected = stored ? compactYear(stored) : compactYear(activeLabel);
+        setAcademicYear(selected);
+        sessionStorage.setItem("academicYear", selected);
+      } catch (e) {
+        // Fallback to initial
+      }
+    };
+    loadCycles();
+    return () => {
+      isActive = false;
+    };
+  }, []);
+
   const profile = {
     name: sessionStorage.getItem("name") || "Director of Schools",
     designation: sessionStorage.getItem("designation") || "Director",
@@ -35,6 +72,11 @@ export default function DirectorDashboard() {
         roleTitle="Academic Audit"
         roleText="Director of Schools"
         academicYear={academicYear}
+        availableYears={availableYears}
+        onYearChange={(newYear) => {
+          sessionStorage.setItem("academicYear", newYear);
+          setAcademicYear(newYear);
+        }}
         items={directorAuditSchema.sections}
         activeId={activeSectionId}
         onChange={(sectionId) => {

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { getApiErrorMessage } from "../../api/client";
 import { login, verifyOtp, resendOtp, requestPasswordReset } from "../../api/auth";
-import { dashboardForRole, normalizeUserProfile } from "../../api/submissions";
+import { dashboardForRole, normalizeUserProfile, fetchCurrentAuditCycle } from "../../api/submissions";
 import { InlineSpinner } from "../../features/schoolAppraisal/components/LoadingState";
 import backgroundImage from "../../assets/images/dyp.jpeg";
 import iqacLogo from "../../assets/images/IQAS.png";
@@ -49,7 +49,7 @@ export default function Login() {
     return `${m}:${s < 10 ? "0" : ""}${s}`;
   };
 
-  const storeSessionAndNavigate = (profile, email) => {
+  const storeSessionAndNavigate = async (profile, email) => {
     sessionStorage.setItem("token", profile.token);
     sessionStorage.setItem("userId", profile.id);
     sessionStorage.setItem("email", profile.email || email);
@@ -63,8 +63,18 @@ export default function Login() {
     sessionStorage.setItem("category", profile.category);
     sessionStorage.setItem("auditorType", profile.auditorType);
     sessionStorage.setItem("auditorRole", profile.auditorRole);
-    if (profile.academicYear) sessionStorage.setItem("academicYear", profile.academicYear);
     sessionStorage.setItem("role", profile.role);
+    try {
+      const { data } = await fetchCurrentAuditCycle();
+      const activeYear = data?.activeYear || data?.academicYear;
+      if (activeYear) {
+        sessionStorage.setItem("academicYear", activeYear);
+      } else if (profile.academicYear) {
+        sessionStorage.setItem("academicYear", profile.academicYear);
+      }
+    } catch {
+      if (profile.academicYear) sessionStorage.setItem("academicYear", profile.academicYear);
+    }
     navigate(dashboardForRole(profile.role), { replace: true });
   };
 

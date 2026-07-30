@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getApiErrorMessage } from "../../../api/client";
-import { SIGN_OFF_FIELD, buildSubmissionPayload, deleteAttachment, fetchMyDraft, normalizeDraft, saveDraft, uploadAttachments, fetchAdministrativeStatus, submitAdministrativePart } from "../../../api/submissions";
+import { SIGN_OFF_FIELD, buildSubmissionPayload, deleteAttachment, fetchMyDraft, normalizeDraft, saveDraft, uploadAttachments, fetchAdministrativeStatus, submitAdministrativePart, fetchCurrentAuditCycle } from "../../../api/submissions";
 import universityLogo from "../../../assets/images/image.png";
 import AuditTable from "../components/AuditTable";
 import DateInput from "../components/DateInput";
@@ -219,7 +219,36 @@ const storedAdministrativeStatusFor = (fields = {}) => (
 
 export default function AdministrativeAuditDashboard() {
   const navigate = useNavigate();
-  const academicYear = sessionStorage.getItem("academicYear") || administrativeAuditMeta.academicYear;
+  const [academicYear, setAcademicYear] = useState(
+    sessionStorage.getItem("academicYear") ? compactAcademicYear(sessionStorage.getItem("academicYear")) : "2025-26"
+  );
+  const [availableYears, setAvailableYears] = useState(["2025-26", "2026-27"]);
+
+  useEffect(() => {
+    let isActive = true;
+    const loadCycles = async () => {
+      try {
+        const { data } = await fetchCurrentAuditCycle();
+        if (!isActive) return;
+        const activeLabel = data.activeYear || "2025-2026";
+        const rawYears = data.availableYears || [activeLabel];
+        const formatted = Array.from(new Set(rawYears.map(compactAcademicYear))).sort();
+        setAvailableYears(formatted);
+
+        const stored = sessionStorage.getItem("academicYear");
+        const selected = stored ? compactAcademicYear(stored) : compactAcademicYear(activeLabel);
+        setAcademicYear(selected);
+        sessionStorage.setItem("academicYear", selected);
+      } catch (e) {
+        // Fallback
+      }
+    };
+    loadCycles();
+    return () => {
+      isActive = false;
+    };
+  }, []);
+
   const profile = getUserProfile();
   const userPost = normalizePost(profile.post || profile.designation);
   const firstOwnedModule = administrativeUserModules.find((module) => moduleOwnerPost(module) === userPost);
@@ -637,6 +666,11 @@ export default function AdministrativeAuditDashboard() {
           setActiveModuleId={handleModuleChange}
           profile={profile}
           academicYear={academicYear}
+          availableYears={availableYears}
+          onYearChange={(newYear) => {
+            sessionStorage.setItem("academicYear", newYear);
+            setAcademicYear(newYear);
+          }}
           onLogout={() => setShowLogoutModal(true)}
         />
 
@@ -959,7 +993,7 @@ function AttachmentField({
   );
 }
 
-function Sidebar({ activeModuleId, setActiveModuleId, profile, academicYear, onLogout }) {
+function Sidebar({ activeModuleId, setActiveModuleId, profile, academicYear, availableYears, onYearChange, onLogout }) {
   return (
     <AppSidebar
       title="Administrative Audit"
@@ -967,6 +1001,8 @@ function Sidebar({ activeModuleId, setActiveModuleId, profile, academicYear, onL
       badge="AA"
       roleTitle="Administrative Module"
       academicYear={academicYear}
+      availableYears={availableYears}
+      onYearChange={onYearChange}
       roleText="Registrar · HR · DSW · Placement"
       items={administrativeUserModules}
       activeId={activeModuleId}

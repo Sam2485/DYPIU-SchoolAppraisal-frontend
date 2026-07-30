@@ -399,6 +399,8 @@ export const createNextAuditCycle = (id, payload = {}) =>
     preserveApprovedVersion: true,
     ...payload,
   });
+export const fetchAuditCycles = () => apiClient.get("/api/audit-cycles");
+export const fetchCurrentAuditCycle = () => apiClient.get("/api/audit-cycles/current");
 export const startNextAcademicYear = (payload) =>
   apiClient.post("/api/audit-cycles/start-next", payload);
 

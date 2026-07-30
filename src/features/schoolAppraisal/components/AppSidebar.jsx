@@ -22,6 +22,8 @@ export default function AppSidebar({
   roleTitle,
   roleText,
   academicYear = "2025-26",
+  availableYears = [],
+  onYearChange,
   items,
   pinnedItems = [],
   standaloneItems = [],
@@ -88,7 +90,35 @@ export default function AppSidebar({
           <strong>{roleTitle}</strong>
           <small>{roleText}</small>
         </div>
-        <span className="app-sidebar__year">AY {academicYear}</span>
+        {onYearChange && availableYears && availableYears.length > 0 ? (
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "2px" }}>
+            <span style={{ fontSize: "10px", fontWeight: 700, color: "rgba(255, 255, 255, 0.6)", textTransform: "uppercase", letterSpacing: "0.5px" }}>Academic Year</span>
+            <select
+              value={academicYear}
+              onChange={(e) => onYearChange(e.target.value)}
+              style={{
+                backgroundColor: "rgba(255, 255, 255, 0.15)",
+                color: "#ffffff",
+                border: "1px solid rgba(255, 255, 255, 0.3)",
+                borderRadius: "6px",
+                padding: "3px 8px",
+                fontSize: "12px",
+                fontWeight: 600,
+                cursor: "pointer",
+                outline: "none",
+              }}
+              title="Select Academic Year"
+            >
+              {availableYears.map((yr) => (
+                <option key={yr} value={yr} style={{ backgroundColor: "#1e293b", color: "#ffffff" }}>
+                  {yr}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : (
+          <span className="app-sidebar__year">AY {academicYear}</span>
+        )}
       </div>
 
       <nav className="app-sidebar__nav" aria-label="Appraisal sections" ref={dropdownRef}>

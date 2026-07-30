@@ -13,6 +13,7 @@ import {
   parseSubmissionFormData,
   reviewSubmission,
   startNextAcademicYear,
+  fetchCurrentAuditCycle,
   submitAuditorReview,
   updateSubmissionById,
   uploadAttachments,
@@ -1360,6 +1361,33 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
   const [academicYear, setAcademicYear] = useState(
     normalizeAcademicYear(sessionStorage.getItem("academicYear") || "2025-2026"),
   );
+  const [availableYears, setAvailableYears] = useState(["2025-26", "2026-27"]);
+
+  useEffect(() => {
+    let isActive = true;
+    const loadAuditCycles = async () => {
+      try {
+        const { data } = await fetchCurrentAuditCycle();
+        if (!isActive) return;
+        const activeLabel = data.activeYear || "2025-2026";
+        const rawYears = data.availableYears || [activeLabel];
+        const formattedYears = Array.from(new Set(rawYears.map(compactAcademicYear))).sort();
+        setAvailableYears(formattedYears);
+
+        const stored = sessionStorage.getItem("academicYear");
+        const selected = stored ? compactAcademicYear(stored) : compactAcademicYear(activeLabel);
+        setAcademicYear(normalizeAcademicYear(selected));
+        sessionStorage.setItem("academicYear", selected);
+      } catch (e) {
+        // Fallback
+      }
+    };
+    loadAuditCycles();
+    return () => {
+      isActive = false;
+    };
+  }, []);
+
   const [showNextYearModal, setShowNextYearModal] = useState(false);
   const [startingAcademicYear, setStartingAcademicYear] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -2226,7 +2254,12 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
           badge={roleConfig.badge}
           roleTitle={roleConfig.roleTitle}
           roleText={roleConfig.roleText}
-          academicYear={academicYear}
+          academicYear={compactAcademicYear(academicYear)}
+          availableYears={availableYears}
+          onYearChange={(newYear) => {
+            sessionStorage.setItem("academicYear", newYear);
+            setAcademicYear(normalizeAcademicYear(newYear));
+          }}
           items={navigationItems}
           pinnedItems={pinnedNavigationItems}
           standaloneItems={standaloneNavigationItems}
