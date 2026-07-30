@@ -259,7 +259,16 @@ function buildInitialTables(schema) {
   }, {});
 }
 
-export default function AuditForm({ schema, academicYear = schema.academicYear, activeSectionId, reportMode, onReportModeChange, onSectionChange }) {
+export default function AuditForm({
+  schema,
+  academicYear = schema.academicYear,
+  activeAcademicYear,
+  isHistoricalYear: isHistoricalProp,
+  activeSectionId,
+  reportMode,
+  onReportModeChange,
+  onSectionChange,
+}) {
   const auditType = schema.id.includes("administrative") ? "administrative" : "academic";
   const initialValues = useMemo(() => buildInitialValues(schema), [schema]);
   const initialTables = useMemo(() => buildInitialTables(schema), [schema]);
@@ -278,7 +287,10 @@ export default function AuditForm({ schema, academicYear = schema.academicYear, 
   const [printReportAfterRender, setPrintReportAfterRender] = useState(false);
   const activeSectionIndex = Math.max(0, schema.sections.findIndex((section) => section.id === activeSectionId));
   const isLastSection = activeSectionIndex === schema.sections.length - 1;
-  const readOnly = isSubmitted;
+  const isHistoricalYear = isHistoricalProp !== undefined
+    ? isHistoricalProp
+    : Boolean(activeAcademicYear && compactAcademicYear(academicYear) !== compactAcademicYear(activeAcademicYear));
+  const readOnly = isSubmitted || isHistoricalYear;
   const canSubmit = isSubmissionConfirmed(submissionConfirmation);
   const progress = Math.round(((activeSectionIndex + 1) / schema.sections.length) * 100);
 
@@ -523,6 +535,26 @@ export default function AuditForm({ schema, academicYear = schema.academicYear, 
           <span style={{ ...styles.progressBar, width: `${progress}%` }} />
         </div>
       </header>
+
+      {isHistoricalYear && (
+        <div style={{
+          backgroundColor: "#eff6ff",
+          border: "1px solid #bfdbfe",
+          color: "#1e40af",
+          padding: "12px 16px",
+          borderRadius: "8px",
+          marginTop: "16px",
+          marginBottom: "16px",
+          fontSize: "14px",
+          fontWeight: 600,
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
+        }}>
+          <span style={{ fontSize: "16px" }}>ℹ️</span>
+          <span>Viewing Historical Appraisal Record for Academic Year <strong>{academicYear}</strong>. Previous academic year records are read-only.</span>
+        </div>
+      )}
 
       {status && <div style={styles.status}>{status}</div>}
       {loadingDraft && <LoadingState label="Loading saved form..." compact />}

@@ -20,6 +20,7 @@ export default function DirectorDashboard() {
   const [academicYear, setAcademicYear] = useState(
     sessionStorage.getItem("academicYear") ? compactYear(sessionStorage.getItem("academicYear")) : "2025-26"
   );
+  const [activeAcademicYear, setActiveAcademicYear] = useState("");
   const [availableYears, setAvailableYears] = useState(["2025-26", "2026-27"]);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [activeSectionId, setActiveSectionId] = useState(directorAuditSchema.sections[0].id);
@@ -32,12 +33,15 @@ export default function DirectorDashboard() {
         const { data } = await fetchCurrentAuditCycle();
         if (!isActive) return;
         const activeLabel = data.activeYear || "2025-2026";
+        const activeFormatted = compactYear(activeLabel);
+        setActiveAcademicYear(activeFormatted);
+
         const rawYears = data.availableYears || [activeLabel];
         const formatted = Array.from(new Set(rawYears.map(compactYear))).sort();
         setAvailableYears(formatted);
 
         const stored = sessionStorage.getItem("academicYear");
-        const selected = stored ? compactYear(stored) : compactYear(activeLabel);
+        const selected = stored ? compactYear(stored) : activeFormatted;
         setAcademicYear(selected);
         sessionStorage.setItem("academicYear", selected);
       } catch (e) {
@@ -49,6 +53,8 @@ export default function DirectorDashboard() {
       isActive = false;
     };
   }, []);
+
+  const isHistoricalYear = Boolean(activeAcademicYear && compactYear(academicYear) !== compactYear(activeAcademicYear));
 
   const profile = {
     name: sessionStorage.getItem("name") || "Director of Schools",
@@ -92,6 +98,8 @@ export default function DirectorDashboard() {
         <AuditForm
           schema={directorAuditSchema}
           academicYear={academicYear}
+          activeAcademicYear={activeAcademicYear}
+          isHistoricalYear={isHistoricalYear}
           activeSectionId={activeSectionId}
           reportMode={reportMode}
           onReportModeChange={setReportMode}

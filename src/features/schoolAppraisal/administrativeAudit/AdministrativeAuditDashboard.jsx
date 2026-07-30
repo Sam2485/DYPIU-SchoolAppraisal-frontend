@@ -222,6 +222,7 @@ export default function AdministrativeAuditDashboard() {
   const [academicYear, setAcademicYear] = useState(
     sessionStorage.getItem("academicYear") ? compactAcademicYear(sessionStorage.getItem("academicYear")) : "2025-26"
   );
+  const [activeAcademicYear, setActiveAcademicYear] = useState("");
   const [availableYears, setAvailableYears] = useState(["2025-26", "2026-27"]);
 
   useEffect(() => {
@@ -231,12 +232,15 @@ export default function AdministrativeAuditDashboard() {
         const { data } = await fetchCurrentAuditCycle();
         if (!isActive) return;
         const activeLabel = data.activeYear || "2025-2026";
+        const formattedActive = compactAcademicYear(activeLabel);
+        setActiveAcademicYear(formattedActive);
+
         const rawYears = data.availableYears || [activeLabel];
         const formatted = Array.from(new Set(rawYears.map(compactAcademicYear))).sort();
         setAvailableYears(formatted);
 
         const stored = sessionStorage.getItem("academicYear");
-        const selected = stored ? compactAcademicYear(stored) : compactAcademicYear(activeLabel);
+        const selected = stored ? compactAcademicYear(stored) : formattedActive;
         setAcademicYear(selected);
         sessionStorage.setItem("academicYear", selected);
       } catch (e) {
@@ -248,6 +252,8 @@ export default function AdministrativeAuditDashboard() {
       isActive = false;
     };
   }, []);
+
+  const isHistoricalYear = Boolean(activeAcademicYear && compactAcademicYear(academicYear) !== compactAcademicYear(activeAcademicYear));
 
   const profile = getUserProfile();
   const userPost = normalizePost(profile.post || profile.designation);
@@ -289,7 +295,7 @@ export default function AdministrativeAuditDashboard() {
     workflow.canEditContribution === false ||
     isLockedContributionStatus(workflow.contributionStatus);
   const contributionLocked = !backendAllowsContributionEdit && (isSubmitted || contributionApproved);
-  const readOnly = !canEditActiveModule || backendBlocksContributionEdit || contributionLocked;
+  const readOnly = isHistoricalYear || !canEditActiveModule || backendBlocksContributionEdit || contributionLocked;
   const isFinalOwnedModule = canEditActiveModule && activeModule.id === finalOwnedModule?.id;
   const canWorkOnOwnedModule = canEditActiveModule && !backendBlocksContributionEdit && !contributionLocked;
   const canSubmitPart = isSubmissionConfirmed(submissionConfirmation);
@@ -693,6 +699,26 @@ export default function AdministrativeAuditDashboard() {
               </button>
             </div>
           </header>
+
+          {isHistoricalYear && (
+            <div style={{
+              backgroundColor: "#eff6ff",
+              border: "1px solid #bfdbfe",
+              color: "#1e40af",
+              padding: "12px 16px",
+              borderRadius: "8px",
+              marginTop: "16px",
+              marginBottom: "16px",
+              fontSize: "14px",
+              fontWeight: 600,
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+            }}>
+              <span style={{ fontSize: "16px" }}>ℹ️</span>
+              <span>Viewing Historical Administrative Audit Record for Academic Year <strong>{academicYear}</strong>. Previous academic year records are read-only.</span>
+            </div>
+          )}
 
           {status && <div style={styles.submitStatus}>{status}</div>}
           {loadingDraft && <LoadingState label="Loading saved form..." compact />}

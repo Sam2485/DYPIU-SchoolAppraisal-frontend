@@ -157,12 +157,16 @@ export const normalizeUserProfile = (payload = {}) => {
 
 export const normalizeDraft = (payload = {}, fallbackValues = {}, fallbackTables = {}) => {
   const unwrapDraftPayload = (value = {}) => {
-    if (Array.isArray(value)) return value[0] || {};
+    if (Array.isArray(value)) return value[0] ? unwrapDraftPayload(value[0]) : {};
     if (!value || typeof value !== "object") return {};
     if (value.valuesData || value.values || value.fieldsData || value.fields || value.tablesData || value.tables || value.status || value.submissionId || value.id) {
       return value;
     }
-    return unwrapDraftPayload(value.submission || value.draft || value.data || {});
+    const inner = value.submission || value.draft || value.data;
+    if (inner && typeof inner === "object" && inner !== value) {
+      return unwrapDraftPayload(inner);
+    }
+    return value;
   };
   const draft = unwrapDraftPayload(payload);
   const valuesData = draft.valuesData ?? draft.values ?? draft.fieldsData ?? draft.fields;
