@@ -44,7 +44,7 @@ export default function DirectorDashboard() {
         const selected = stored ? compactYear(stored) : activeFormatted;
         setAcademicYear(selected);
         sessionStorage.setItem("academicYear", selected);
-      } catch (e) {
+      } catch {
         // Fallback to initial
       }
     };

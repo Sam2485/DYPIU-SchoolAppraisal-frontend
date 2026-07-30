@@ -243,7 +243,7 @@ export default function AdministrativeAuditDashboard() {
         const selected = stored ? compactAcademicYear(stored) : formattedActive;
         setAcademicYear(selected);
         sessionStorage.setItem("academicYear", selected);
-      } catch (e) {
+      } catch {
         // Fallback
       }
     };
