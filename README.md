@@ -26,9 +26,10 @@ docker build -t school-appraisal-frontend .
 docker run -d --name school-appraisal-frontend --net=host school-appraisal-frontend
 ```
 
-## Attachment URL Resolution on VM
+## Attachment URL Resolution & Count Aggregation
 
-The frontend handles attachment files via relative local path equivalents (`/uploads/...`), serving files directly from the VM's backend `/uploads` endpoint.
+1. **Relative Path Handling**: The frontend handles attachment files via relative local path equivalents (`/uploads/...`), serving files directly from the VM's backend `/uploads` endpoint.
+2. **Multi-Source Aggregation**: `extractAllUniqueAttachments` and `parseSubmissionFormData` in `src/api/submissions.js` scan `attachments`, `tablesData`, and `valuesData` to aggregate all unique attachment objects across section tables and fields. This ensures the Attachments count pill on review dashboard cards accurately reflects the full count of uploaded files across all sections.
 
 ---
 
