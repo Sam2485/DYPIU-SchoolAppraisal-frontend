@@ -677,6 +677,7 @@ export default function AdministrativeAuditDashboard() {
           setActiveModuleId={handleModuleChange}
           profile={profile}
           academicYear={academicYear}
+          currentAcademicYear={activeAcademicYear}
           availableYears={availableYears}
           onYearChange={(newYear) => {
             sessionStorage.setItem("academicYear", newYear);
@@ -1026,7 +1027,7 @@ function AttachmentField({
   );
 }
 
-function Sidebar({ activeModuleId, setActiveModuleId, profile, academicYear, availableYears, onYearChange, onLogout }) {
+function Sidebar({ activeModuleId, setActiveModuleId, profile, academicYear, currentAcademicYear, availableYears, onYearChange, onLogout }) {
   return (
     <AppSidebar
       title="Administrative Audit"
@@ -1034,6 +1035,7 @@ function Sidebar({ activeModuleId, setActiveModuleId, profile, academicYear, ava
       badge="AA"
       roleTitle="Administrative Module"
       academicYear={academicYear}
+      currentAcademicYear={currentAcademicYear}
       availableYears={availableYears}
       onYearChange={onYearChange}
       roleText="Registrar · HR · DSW · Placement"

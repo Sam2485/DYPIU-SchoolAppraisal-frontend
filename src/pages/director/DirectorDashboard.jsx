@@ -78,6 +78,7 @@ export default function DirectorDashboard() {
         roleTitle="Academic Audit"
         roleText="Director of Schools"
         academicYear={academicYear}
+        currentAcademicYear={activeAcademicYear}
         availableYears={availableYears}
         onYearChange={(newYear) => {
           sessionStorage.setItem("academicYear", newYear);
