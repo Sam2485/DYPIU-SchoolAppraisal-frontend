@@ -526,7 +526,9 @@ export default function AuditForm({
             <p style={styles.meta}>{schema.header.address}</p>
             <div style={styles.headerMetaRow}>
               <span style={styles.year}>Academic Year {academicYear}</span>
-              <span style={styles.draftPill}>In Progress</span>
+              <span style={isHistoricalYear ? styles.readOnlyPill : styles.draftPill}>
+                {isHistoricalYear ? "Read Only" : "Current Workspace"}
+              </span>
             </div>
           </div>
         </div>
@@ -698,6 +700,7 @@ const styles = {
   headerMetaRow: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 10 },
   year: { color: "#334155", fontSize: 11, fontWeight: 650 },
   draftPill: { padding: "4px 8px", borderRadius: 999, color: "#0369a1", background: "#e0f2fe", fontSize: 9.5, fontWeight: 700, letterSpacing: ".03em", textTransform: "uppercase" },
+  readOnlyPill: { padding: "4px 8px", borderRadius: 999, color: "#475569", background: "#e2e8f0", fontSize: 9.5, fontWeight: 700, letterSpacing: ".03em", textTransform: "uppercase" },
   progressTrack: { position: "absolute", left: 0, right: 0, bottom: 0, height: 4, background: "#eff6ff" },
   progressBar: { display: "block", height: "100%", borderRadius: "0 4px 4px 0", background: "linear-gradient(90deg, #2563eb, #38bdf8)", transition: "width .3s ease" },
   actions: {

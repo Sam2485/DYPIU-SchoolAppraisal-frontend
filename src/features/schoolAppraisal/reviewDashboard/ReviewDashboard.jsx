@@ -1336,6 +1336,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
   const navigate = useNavigate();
   const role = String(sessionStorage.getItem("role") || "iqac").toLowerCase().replaceAll("_", "-");
   const isAuditor = dashboardKind === "auditor" || isAuditorRole(role);
+  const isIqacDashboard = role === "iqac" && !isAuditor;
   const initialAuditorCategory = sessionStorage.getItem("category") || auditCategoryFromRole(role) || "academic";
   const [activeView, setActiveView] = useState(isAuditor ? initialAuditorCategory : "overview");
   const [activeGroup, setActiveGroup] = useState({ academic: "all", administrative: "all" });
@@ -1361,6 +1362,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
   const [academicYear, setAcademicYear] = useState(
     normalizeAcademicYear(sessionStorage.getItem("academicYear") || "2025-2026"),
   );
+  const [activeAcademicYear, setActiveAcademicYear] = useState("");
   const [availableYears, setAvailableYears] = useState(["2025-26", "2026-27"]);
 
   useEffect(() => {
@@ -1370,12 +1372,13 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
         const { data } = await fetchCurrentAuditCycle();
         if (!isActive) return;
         const activeLabel = data.activeYear || "2025-2026";
+        setActiveAcademicYear(compactAcademicYear(activeLabel));
         const rawYears = data.availableYears || [activeLabel];
         const formattedYears = Array.from(new Set(rawYears.map(compactAcademicYear))).sort();
         setAvailableYears(formattedYears);
 
         const stored = sessionStorage.getItem("academicYear");
-        const selected = stored ? compactAcademicYear(stored) : compactAcademicYear(activeLabel);
+        const selected = isIqacDashboard || !stored ? compactAcademicYear(activeLabel) : compactAcademicYear(stored);
         setAcademicYear(normalizeAcademicYear(selected));
         sessionStorage.setItem("academicYear", selected);
       } catch {
@@ -1386,7 +1389,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
     return () => {
       isActive = false;
     };
-  }, []);
+  }, [isIqacDashboard]);
 
   const [showNextYearModal, setShowNextYearModal] = useState(false);
   const [startingAcademicYear, setStartingAcademicYear] = useState(false);
@@ -2255,8 +2258,9 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
           roleTitle={roleConfig.roleTitle}
           roleText={roleConfig.roleText}
           academicYear={compactAcademicYear(academicYear)}
+          currentAcademicYear={activeAcademicYear}
           availableYears={availableYears}
-          onYearChange={(newYear) => {
+          onYearChange={isIqacDashboard ? undefined : (newYear) => {
             sessionStorage.setItem("academicYear", newYear);
             setAcademicYear(normalizeAcademicYear(newYear));
           }}

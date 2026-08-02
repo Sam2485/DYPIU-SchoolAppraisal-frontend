@@ -22,6 +22,7 @@ export default function AppSidebar({
   roleTitle,
   roleText,
   academicYear = "2025-26",
+  currentAcademicYear = "",
   availableYears = [],
   onYearChange,
   items,
@@ -33,6 +34,8 @@ export default function AppSidebar({
   onLogout,
 }) {
   const activeItem = items.find((item) => item.id === activeId);
+  const hasYearSelector = Boolean(onYearChange && availableYears?.length);
+  const isCurrentAcademicYear = (year) => currentAcademicYear && String(year) === String(currentAcademicYear);
   const actionGroups = standaloneItems.reduce((groups, item) => {
     const groupId = item.group || "review-actions";
     const existingGroup = groups.find((group) => group.id === groupId);
@@ -90,9 +93,9 @@ export default function AppSidebar({
           <strong>{roleTitle}</strong>
           <small>{roleText}</small>
         </div>
-        {onYearChange && availableYears && availableYears.length > 0 ? (
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "2px" }}>
-            <span style={{ fontSize: "10px", fontWeight: 700, color: "rgba(255, 255, 255, 0.6)", textTransform: "uppercase", letterSpacing: "0.5px" }}>Academic Year</span>
+        {hasYearSelector ? (
+          <div className="app-sidebar__year-selector">
+            <span>Academic Year</span>
             <select
               value={academicYear}
               onChange={(e) => onYearChange(e.target.value)}
@@ -115,9 +118,15 @@ export default function AppSidebar({
                 </option>
               ))}
             </select>
+            {currentAcademicYear && (
+              <small>{isCurrentAcademicYear(academicYear) ? "Current workspace" : `Current: ${currentAcademicYear}`}</small>
+            )}
           </div>
         ) : (
-          <span className="app-sidebar__year">AY {academicYear}</span>
+          <div className="app-sidebar__year-display">
+            <span>Academic Year</span>
+            <strong>{academicYear}</strong>
+          </div>
         )}
       </div>
 
