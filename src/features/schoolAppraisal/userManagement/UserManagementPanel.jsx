@@ -230,6 +230,8 @@ const editFormFromUser = (user = {}) => {
   };
 };
 
+const canDeleteUser = (user = {}) => user.accountType === "auditor";
+
 export default function UserManagementPanel() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -241,8 +243,6 @@ export default function UserManagementPanel() {
   const [creating, setCreating] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deletingId, setDeletingId] = useState("");
-  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
-  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
   const [editForm, setEditForm] = useState(emptyForm);
   const [editErrors, setEditErrors] = useState({});
@@ -458,6 +458,11 @@ export default function UserManagementPanel() {
 
   const handleDelete = async () => {
     if (!deleteTarget?.id) return;
+    if (!canDeleteUser(deleteTarget)) {
+      setDeleteTarget(null);
+      setStatus("Only auditor accounts can be deleted.");
+      return;
+    }
 
     setDeletingId(deleteTarget.id);
     setStatus("");
@@ -472,36 +477,6 @@ export default function UserManagementPanel() {
       setStatus(getApiErrorMessage(error, "Could not delete the user. The backend should provide DELETE /api/users/:id."));
     } finally {
       setDeletingId("");
-    }
-  };
-
-  const handleDeleteAllUsers = async () => {
-    if (!users.length || bulkDeleting) return;
-
-    const targets = users;
-    setBulkDeleting(true);
-    setStatus("");
-
-    try {
-      const results = await Promise.allSettled(targets.map((user) => deleteUser(user.id)));
-      const deletedUsers = targets.filter((_, index) => results[index].status === "fulfilled");
-      const failedCount = targets.length - deletedUsers.length;
-
-      deletedUsers.forEach(forgetAcademicAuditorSchools);
-      setUsers((current) => {
-        const deletedIds = new Set(deletedUsers.map((user) => user.id));
-        return current.filter((user) => !deletedIds.has(user.id));
-      });
-      setBulkDeleteOpen(false);
-      setStatus(
-        failedCount
-          ? `${deletedUsers.length} users deleted. ${failedCount} could not be deleted.`
-          : `${deletedUsers.length} users deleted successfully.`
-      );
-    } catch (error) {
-      setStatus(getApiErrorMessage(error, "Could not delete all users."));
-    } finally {
-      setBulkDeleting(false);
     }
   };
 
@@ -581,15 +556,6 @@ export default function UserManagementPanel() {
           <p style={styles.description}>View Academic, Administrative and auditor accounts or create a new account.</p>
         </div>
         <div style={styles.headingActions}>
-          <button
-            type="button"
-            style={styles.deleteAllButton}
-            className="user-management-no-print"
-            onClick={() => setBulkDeleteOpen(true)}
-            disabled={loading || !users.length || bulkDeleting}
-          >
-            Delete All Users
-          </button>
           <button type="button" className="btn btn-secondary user-management-no-print" onClick={handlePrintUsers} disabled={loading || !users.length}>
             <span aria-hidden="true">⎙</span>
             Print Users
@@ -786,7 +752,7 @@ export default function UserManagementPanel() {
                       <button
                         type="button"
                         className="user-management-action-button user-management-action-button--edit"
-                        style={styles.editButton}
+                        style={canDeleteUser(user) ? styles.editButton : styles.singleActionButton}
                         onClick={() => openEdit(user)}
                         disabled={updatingId === user.id}
                         aria-label={`Edit ${user.name}`}
@@ -799,22 +765,24 @@ export default function UserManagementPanel() {
                           </svg>
                         </span>
                       </button>
-                      <button
-                        type="button"
-                        className="user-management-action-button user-management-action-button--delete"
-                        style={styles.deleteButton}
-                        onClick={() => setDeleteTarget(user)}
-                        disabled={deletingId === user.id}
-                        aria-label={`Delete ${user.name}`}
-                        title={`Delete ${user.name}`}
-                      >
-                        <span style={styles.deleteIcon} aria-hidden="true">
-                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-                            <path d="M9 3h6l1 2h4v2H4V5h4l1-2Z" fill="currentColor" />
-                            <path d="M6.5 9h11l-.7 10.2A2 2 0 0 1 14.8 21H9.2a2 2 0 0 1-2-1.8L6.5 9Z" fill="currentColor" opacity=".78" />
-                          </svg>
-                        </span>
-                      </button>
+                      {canDeleteUser(user) && (
+                        <button
+                          type="button"
+                          className="user-management-action-button user-management-action-button--delete"
+                          style={styles.deleteButton}
+                          onClick={() => setDeleteTarget(user)}
+                          disabled={deletingId === user.id}
+                          aria-label={`Delete ${user.name}`}
+                          title={`Delete ${user.name}`}
+                        >
+                          <span style={styles.deleteIcon} aria-hidden="true">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+                              <path d="M9 3h6l1 2h4v2H4V5h4l1-2Z" fill="currentColor" />
+                              <path d="M6.5 9h11l-.7 10.2A2 2 0 0 1 14.8 21H9.2a2 2 0 0 1-2-1.8L6.5 9Z" fill="currentColor" opacity=".78" />
+                            </svg>
+                          </span>
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -831,14 +799,6 @@ export default function UserManagementPanel() {
         deletingId={deletingId}
         onCancel={() => setDeleteTarget(null)}
         onConfirm={handleDelete}
-      />
-      <DeleteAllUsersDialog
-        open={bulkDeleteOpen}
-        totalUsers={users.length}
-        totalAuditors={userStats.auditors}
-        deleting={bulkDeleting}
-        onCancel={() => setBulkDeleteOpen(false)}
-        onConfirm={handleDeleteAllUsers}
       />
 
       {shouldRenderInlineDeleteDialog() && deleteTarget && (
@@ -1240,37 +1200,6 @@ function DeleteUserDialog({ target, deletingId, onCancel, onConfirm }) {
   );
 }
 
-function DeleteAllUsersDialog({ open, totalUsers, totalAuditors, deleting, onCancel, onConfirm }) {
-  if (!open || typeof document === "undefined") return null;
-
-  return createPortal(
-    <div style={styles.modalOverlay} role="dialog" aria-modal="true" aria-labelledby="delete-all-users-title">
-      <div style={styles.modalCard}>
-        <div style={styles.warningIcon}>!</div>
-        <div>
-          <p style={styles.kicker}>Delete all users</p>
-          <h3 id="delete-all-users-title" style={styles.modalTitle}>Remove every account?</h3>
-          <p style={styles.modalText}>
-            This will delete <strong>{totalUsers}</strong> user account{totalUsers === 1 ? "" : "s"}, including <strong>{totalAuditors}</strong> auditor account{totalAuditors === 1 ? "" : "s"}.
-          </p>
-          <div style={styles.deleteAllWarning}>
-            This action cannot be undone from User Management.
-          </div>
-        </div>
-        <div style={styles.modalActions}>
-          <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={deleting}>
-            Cancel
-          </button>
-          <button type="button" style={styles.confirmDeleteButton} onClick={onConfirm} disabled={deleting || !totalUsers}>
-            {deleting ? "Deleting all..." : "Yes, Delete All"}
-          </button>
-        </div>
-      </div>
-    </div>,
-    document.body,
-  );
-}
-
 function Field({ label, error, children }) {
   return (
     <div style={styles.field}>
@@ -1285,7 +1214,6 @@ const styles = {
   panel: { display: "flex", flexDirection: "column", gap: 18 },
   headingRow: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 18, padding: 20, border: "1px solid #e2e8f0", borderRadius: 16, background: "#fff", boxShadow: "0 12px 35px rgba(15,23,42,.045)" },
   headingActions: { display: "flex", flexDirection: "row-reverse", alignItems: "center", justifyContent: "flex-start", gap: 10, flexWrap: "wrap" },
-  deleteAllButton: { minHeight: 42, marginLeft: 14, border: "1px solid #fecaca", borderRadius: 10, padding: "10px 14px", color: "#b91c1c", background: "#fff5f5", fontSize: 12.5, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" },
   kicker: { margin: "0 0 5px", color: "#2563eb", fontSize: 10, fontWeight: 750, letterSpacing: ".08em", textTransform: "uppercase" },
   title: { margin: "0 0 5px", color: "#0f172a", fontSize: 20, fontWeight: 700 },
   description: { margin: 0, color: "#64748b", fontSize: 12.5 },
@@ -1337,6 +1265,7 @@ const styles = {
   inactiveStatus: { display: "inline-flex", padding: "4px 7px", borderRadius: 999, color: "#991b1b", background: "#fee2e2", fontSize: 10.5, fontWeight: 700, textTransform: "capitalize" },
   actionGroup: { display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 0, padding: 3, border: "1px solid #dbe4f0", borderRadius: 12, background: "#f8fafc", boxShadow: "inset 0 1px 0 rgba(255,255,255,.9)" },
   editButton: { width: 34, height: 32, display: "grid", placeItems: "center", border: 0, borderRight: "1px solid #e2e8f0", borderRadius: "9px 0 0 9px", color: "#2563eb", background: "transparent", cursor: "pointer", fontFamily: "inherit" },
+  singleActionButton: { width: 34, height: 32, display: "grid", placeItems: "center", border: 0, borderRadius: 9, color: "#2563eb", background: "transparent", cursor: "pointer", fontFamily: "inherit" },
   editIcon: { width: 24, height: 24, display: "grid", placeItems: "center", borderRadius: 8, color: "inherit", background: "transparent", flex: "0 0 auto" },
   deleteButton: { width: 34, height: 32, display: "grid", placeItems: "center", border: 0, borderRadius: "0 9px 9px 0", color: "#dc2626", background: "transparent", cursor: "pointer", fontFamily: "inherit" },
   deleteIcon: { width: 24, height: 24, display: "grid", placeItems: "center", borderRadius: 8, color: "inherit", background: "transparent", flex: "0 0 auto" },
@@ -1346,7 +1275,6 @@ const styles = {
   modalTitle: { margin: "0 0 8px", color: "#0f172a", fontSize: 18, fontWeight: 800 },
   modalText: { margin: 0, color: "#475569", fontSize: 13, lineHeight: 1.55 },
   deleteUserPreview: { display: "flex", alignItems: "center", gap: 10, marginTop: 14, padding: 10, border: "1px solid #fee2e2", borderRadius: 14, background: "#fff", color: "#0f172a", fontSize: 12 },
-  deleteAllWarning: { marginTop: 14, padding: "10px 12px", border: "1px solid #fecaca", borderRadius: 12, color: "#991b1b", background: "#fef2f2", fontSize: 12, fontWeight: 750 },
   previewAvatar: { width: 34, height: 34, display: "grid", placeItems: "center", borderRadius: 12, color: "#fff", background: "linear-gradient(135deg, #ef4444, #f97316)", fontWeight: 900 },
   previewMeta: { display: "block", marginTop: 2, color: "#64748b", fontSize: 11 },
   modalActions: { gridColumn: "1 / -1", display: "flex", justifyContent: "flex-end", gap: 10, paddingTop: 6 },

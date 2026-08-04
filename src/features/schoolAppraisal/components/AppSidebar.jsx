@@ -139,7 +139,6 @@ export default function AppSidebar({
           aria-controls="appraisal-section-menu"
         >
           <span>Appraisal form</span>
-          <ChevronIcon />
         </button>
         <div className={`app-sidebar__dropdown${isOpen ? " is-open" : ""}`}>
           <button
