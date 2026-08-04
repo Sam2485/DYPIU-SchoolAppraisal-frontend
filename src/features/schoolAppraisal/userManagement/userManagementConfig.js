@@ -7,6 +7,7 @@ export const SCHOOL_OPTIONS = [
   { name: "School of Media & Communication Studies", code: "SoMCS", group: "nonEngineering" },
   { name: "School of Design", code: "SoD", group: "nonEngineering" },
   { name: "School of Applied Arts", code: "SoAA", group: "nonEngineering" },
+  { name: "School of Humanities & Social Sciences", code: "SoHSS", group: "nonEngineering" },
 ];
 
 const normalizeSchoolValue = (value = "") =>
