@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { getApiErrorMessage } from "../../../api/client";
 import {
@@ -2603,86 +2604,178 @@ function resolvedAuditorTypeFor(submission = {}) {
   );
 }
 
-function secondaryForSubmission(submission = {}) {
-  if (submission.auditType === "academic") {
-    return canonicalSchoolCode(submission.school) || submission.school || "-";
-  }
-  const postCode = canonicalAdministrativePost(submission.post || submission.department || submission.school);
-  return ADMINISTRATIVE_POSTS.find((post) => post.value === postCode)?.label || submission.submittedByDesignation || submission.post || submission.school || "-";
+function classifiedAcademicSchoolCodes(academicSubmissions = []) {
+  return new Set(
+    academicSubmissions
+      .filter((submission) => ["internal", "external"].includes(resolvedAuditorTypeFor(submission)))
+      .map((submission) => canonicalSchoolCode(submission.school) || String(submission.school || "").trim().toUpperCase())
+  );
 }
 
-function secondaryForAssignment(assignment = {}) {
-  if (assignment.post) {
-    return ADMINISTRATIVE_POSTS.find((post) => post.value === assignment.post)?.label || assignment.post;
-  }
-  return assignment.school || "-";
-}
-
-function groupRowsByAuditor(rows = []) {
-  const map = new Map();
-  rows.forEach((row) => {
-    const key = (row.email && row.email !== "-" ? row.email : row.name || "").toLowerCase();
-    const existing = map.get(key);
-    if (!existing) {
-      map.set(key, { name: row.name, email: row.email, secondaries: row.secondary ? [row.secondary] : [], date: row.date || null });
+function classifiedAdministrativePostCodes(administrativeSubmissions = []) {
+  const codes = new Set();
+  administrativeSubmissions.forEach((submission) => {
+    const assignments = submission.auditorAssignments || [];
+    if (assignments.length) {
+      assignments.forEach((assignment) => {
+        if (assignment.post && ["internal", "external"].includes(assignment.auditorType)) codes.add(assignment.post);
+      });
       return;
     }
-    if (row.secondary && !existing.secondaries.includes(row.secondary)) existing.secondaries.push(row.secondary);
-    if (row.date && (!existing.date || row.date > existing.date)) existing.date = row.date;
+    if (["internal", "external"].includes(resolvedAuditorTypeFor(submission))) {
+      const postCode = canonicalAdministrativePost(submission.post || submission.department || submission.school);
+      if (postCode) codes.add(postCode);
+    }
   });
-  return [...map.values()].map((entry) => ({
-    name: entry.name,
-    email: entry.email,
-    secondary: entry.secondaries.join(", ") || "-",
-    date: entry.date,
-  }));
+  return codes;
 }
 
-function auditorPersonCoverage(submissions = [], auditorType) {
+function appendUnclassifiedAccounts(notSubmittedRows, classifiedKeys, accountsByKey, secondaryFor) {
+  Object.entries(accountsByKey).forEach(([key, account]) => {
+    if (classifiedKeys.has(key)) return;
+    notSubmittedRows.push({
+      name: account.name || "-",
+      email: account.email || "-",
+      secondary: secondaryFor(key, account),
+      date: null,
+    });
+  });
+}
+
+// Internal/External auditor coverage is driven by actual auditor ACCOUNTS and their
+// assigned schools/posts — not by whatever a submission's forwardedAuditorType/reportCategory
+// happens to say (those can be pre-classified before any real auditor has been created or
+// assigned). A school/post only counts once a matching auditor account exists and lists it
+// among their assignments; an auditor with multiple assignments is one row per status bucket
+// (their completed schools/posts joined together, and separately their pending ones).
+function auditorAccountCoverage(users = [], auditorType, academicSubmissions = [], administrativeSubmissions = []) {
+  const auditors = users.filter((user) => user.accountType === "auditor" && user.auditorType === auditorType);
+
+  const academicCompletion = new Map();
+  const academicDates = new Map();
+  academicSubmissions.forEach((submission) => {
+    if (resolvedAuditorTypeFor(submission) !== auditorType) return;
+    const code = canonicalSchoolCode(submission.school) || String(submission.school || "").trim().toUpperCase();
+    if (!code) return;
+    const completed = isAuditorCompleted(submission);
+    if (completed || !academicCompletion.has(code)) academicCompletion.set(code, completed);
+    if (completed) academicDates.set(code, submission.auditorReviewedOn || submission.submittedOn);
+  });
+
+  const adminCompletion = new Map();
+  const adminDates = new Map();
+  administrativeSubmissions.forEach((submission) => {
+    const assignments = submission.auditorAssignments || [];
+    if (assignments.length) {
+      assignments.forEach((assignment) => {
+        if (assignment.auditorType !== auditorType || !assignment.post) return;
+        const completed = auditorAssignmentSubmitted(assignment);
+        if (completed || !adminCompletion.has(assignment.post)) adminCompletion.set(assignment.post, completed);
+        if (completed) adminDates.set(assignment.post, assignment.submittedAt);
+      });
+      return;
+    }
+    if (resolvedAuditorTypeFor(submission) !== auditorType) return;
+    const postCode = canonicalAdministrativePost(submission.post || submission.department || submission.school);
+    if (!postCode) return;
+    const completed = isAuditorCompleted(submission);
+    if (completed || !adminCompletion.has(postCode)) adminCompletion.set(postCode, completed);
+    if (completed) adminDates.set(postCode, submission.auditorReviewedOn || submission.submittedOn);
+  });
+
+  const postLabel = (code) => ADMINISTRATIVE_POSTS.find((post) => post.value === code)?.label || code;
+
   const submittedRows = [];
   const notSubmittedRows = [];
 
-  submissions.forEach((submission) => {
-    const assignments = (submission.auditorAssignments || []).filter((assignment) => assignment.auditorType === auditorType);
+  auditors.forEach((auditor) => {
+    const isAcademic = auditor.category === "academic";
+    const keys = isAcademic ? auditor.schools : auditor.administrativePosts;
+    if (!keys?.length) return;
 
-    if (assignments.length) {
-      assignments.forEach((assignment) => {
-        const row = {
-          name: assignment.auditorName || "-",
-          email: assignment.auditorEmail || "-",
-          secondary: secondaryForAssignment(assignment),
-          date: assignment.submittedAt,
-        };
-        if (auditorAssignmentSubmitted(assignment)) submittedRows.push(row);
-        else notSubmittedRows.push({ ...row, date: null });
-      });
-      return;
-    }
+    const completionMap = isAcademic ? academicCompletion : adminCompletion;
+    const dateMap = isAcademic ? academicDates : adminDates;
+    const labelFor = isAcademic ? (key) => key : postLabel;
 
-    if (resolvedAuditorTypeFor(submission) !== auditorType) return;
-    const secondary = secondaryForSubmission(submission);
-    if (isAuditorCompleted(submission)) {
+    // Only count a school/post once IQAC has actually forwarded it to this auditor type
+    // (i.e. it has an entry in the completion map at all) — being assigned to an auditor
+    // isn't enough on its own to appear as "not submitted".
+    const completedKeys = keys.filter((key) => completionMap.get(key) === true);
+    const pendingKeys = keys.filter((key) => completionMap.has(key) && completionMap.get(key) !== true);
+
+    if (completedKeys.length) {
+      const dates = completedKeys.map((key) => dateMap.get(key)).filter(Boolean).sort();
       submittedRows.push({
-        name: submission.auditorReviewedBy || "-",
-        email: submission.auditorReviewedByEmail || "-",
-        secondary,
-        date: submission.auditorReviewedOn,
+        name: auditor.name || "-",
+        email: auditor.email || "-",
+        secondary: completedKeys.map(labelFor).join(", "),
+        date: dates.length ? dates[dates.length - 1] : null,
       });
-    } else {
-      const assignedName = submission.forwardedToAuditorNames?.length ? submission.forwardedToAuditorNames.join(", ") : submission.forwardedToAuditorName;
-      const assignedEmail = submission.forwardedToAuditorEmails?.length ? submission.forwardedToAuditorEmails.join(", ") : submission.forwardedToAuditorEmail;
+    }
+    if (pendingKeys.length) {
       notSubmittedRows.push({
-        name: assignedName || "Not assigned",
-        email: assignedEmail || "-",
-        secondary,
+        name: auditor.name || "-",
+        email: auditor.email || "-",
+        secondary: pendingKeys.map(labelFor).join(", "),
         date: null,
       });
     }
   });
 
-  return { submittedRows: groupRowsByAuditor(submittedRows), notSubmittedRows: groupRowsByAuditor(notSubmittedRows) };
+  return { submittedRows, notSubmittedRows };
 }
 
+// How many items (academic submissions, or individual administrative posts) are ready for
+// IQAC to forward to an auditor of the given type — i.e. the director/post-holder has
+// submitted, but nobody has forwarded it to a specific auditor yet. A submission/post with
+// no resolved track at all defaults to the "internal" queue (internal is always the first
+// stage); a submission already resolved to "external" (e.g. a next-cycle successor) only
+// counts toward the external queue.
+function pendingForwardCount(academicSubmissions = [], administrativeSubmissions = [], auditorType) {
+  let count = 0;
+
+  academicSubmissions.forEach((submission) => {
+    if (normalizeStatus(submission.status) === "draft") return;
+    if (submission.forwardedAt) return;
+    const track = resolvedAuditorTypeFor(submission);
+    if (track === auditorType || (!track && auditorType === "internal")) count += 1;
+  });
+
+  administrativeSubmissions.forEach((submission) => {
+    const track = resolvedAuditorTypeFor(submission);
+    if (track !== auditorType && !(!track && auditorType === "internal")) return;
+    const assignedPosts = new Set((submission.auditorAssignments || []).map((assignment) => assignment.post));
+    administrativeSubmittedPostsFor(submission).forEach((post) => {
+      const postCode = canonicalAdministrativePost(post) || post;
+      if (!assignedPosts.has(postCode)) count += 1;
+    });
+  });
+
+  return count;
+}
+
+// How many items an auditor of the given type has finished reviewing but IQAC hasn't
+// approved yet — reuses the same isAuditorCompleted/isApprovedReport signals the "Auditor
+// Final Review" list elsewhere in this dashboard is already built from.
+function pendingApproveCount(allSubmissions = [], auditorType) {
+  return allSubmissions.filter((submission) =>
+    resolvedAuditorTypeFor(submission) === auditorType &&
+    isAuditorCompleted(submission) &&
+    !isApprovedReport(submission)
+  ).length;
+}
+
+// Whether a submission counts as "submitted" for a given auditor-type track is about the
+// DIRECTOR's own action — did they submit their form for this track — not whether an
+// auditor has since reviewed/completed it. A submission with status "draft" exists only
+// because IQAC started this track for them (e.g. via "Start Next Cycle") but the director
+// hasn't actually filled/submitted it yet, so it counts as not-submitted.
+//
+// For the internal track, directors with no matching submission at all are additionally
+// folded into "not submitted" via appendUnclassifiedAccounts (every director starts here).
+// For the external track, that fallback is deliberately NOT applied — a school only shows
+// up here once its external track has actually been started (a draft/submission for it
+// exists); schools whose external cycle hasn't started yet aren't counted at all.
 function auditorTypeCoverageWithRows(submissions = [], auditorType, resolveContact) {
   const relevant = submissions.filter((submission) => resolvedAuditorTypeFor(submission) === auditorType);
   const submittedRows = [];
@@ -2690,14 +2783,14 @@ function auditorTypeCoverageWithRows(submissions = [], auditorType, resolveConta
 
   relevant.forEach((submission) => {
     const contact = resolveContact(submission) || {};
-    const completed = isAuditorCompleted(submission);
+    const isDraft = normalizeStatus(submission.status) === "draft";
     const row = {
       name: submission.submittedBy || contact.name || "-",
       email: contact.email || "-",
       secondary: contact.secondary || "-",
-      date: completed ? submission.auditorReviewedOn || submission.submittedOn : null,
+      date: isDraft ? null : submission.submittedOn,
     };
-    (completed ? submittedRows : notSubmittedRows).push(row);
+    (isDraft ? notSubmittedRows : submittedRows).push(row);
   });
 
   return { submittedRows, notSubmittedRows };
@@ -2705,7 +2798,7 @@ function auditorTypeCoverageWithRows(submissions = [], auditorType, resolveConta
 
 function SubmissionStatCard({ eyebrow, title, tone, pills }) {
   return (
-    <div className="app-surface-card" style={{ ...styles.submissionStatCard, ...styles[`submissionStatCard--${tone}`] }}>
+    <div className="app-surface-card submission-stat-card" style={{ ...styles.submissionStatCard, ...styles[`submissionStatCard--${tone}`] }}>
       {eyebrow && <span style={styles.submissionStatEyebrow}>{eyebrow}</span>}
       <span style={styles.submissionStatTitle}>{title}</span>
       <div style={styles.submissionStatPills}>
@@ -2728,7 +2821,20 @@ function SubmissionStatCard({ eyebrow, title, tone, pills }) {
 }
 
 function SubmissionListModal({ title, secondaryLabel, showDate, submitted, total, rows, onClose }) {
-  return (
+  // Lock background scroll while open so the page can't be left scrolled to a
+  // position where the (viewport-centered) modal appears to be "below the fold".
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, []);
+
+  // Rendered via a portal straight into <body> so this always centers on the real
+  // viewport, regardless of any transform/filter an ancestor further up the tree
+  // (e.g. a card's hover transform) might otherwise pin it against.
+  return createPortal(
     <div style={styles.modalBackdrop} onClick={onClose}>
       <div
         style={styles.submissionListModal}
@@ -2772,7 +2878,8 @@ function SubmissionListModal({ title, secondaryLabel, showDate, submitted, total
           Close
         </button>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -2794,10 +2901,6 @@ function AcademicAdministrativeSubmissionsPanel({ academicSubmissions = [], admi
     };
   }, []);
 
-  const allAuditSubmissions = useMemo(
-    () => [...academicSubmissions, ...administrativeSubmissions],
-    [academicSubmissions, administrativeSubmissions]
-  );
   const directorsBySchool = useMemo(() => mapUsersBySchool(usersForCategory(users, "academic")), [users]);
   const adminUsersByPost = useMemo(() => mapUsersByPost(usersForCategory(users, "administrative")), [users]);
 
@@ -2820,25 +2923,54 @@ function AcademicAdministrativeSubmissionsPanel({ academicSubmissions = [], admi
   const schoolsExternal = auditorTypeCoverageWithRows(academicSubmissions, "external", resolveSchoolContact);
   const adminInternal = auditorTypeCoverageWithRows(administrativeSubmissions, "internal", resolveAdminContact);
   const adminExternal = auditorTypeCoverageWithRows(administrativeSubmissions, "external", resolveAdminContact);
-  const internalAuditor = auditorPersonCoverage(allAuditSubmissions, "internal");
-  const externalAuditor = auditorPersonCoverage(allAuditSubmissions, "external");
+
+  // Director/admin-post accounts that don't have a submission classified into an auditor
+  // cycle yet (brand-new accounts, or a submitted-but-not-yet-forwarded form) default into
+  // the "Internal ... Not Submitted" bucket instead of being invisible on the dashboard.
+  appendUnclassifiedAccounts(
+    schoolsInternal.notSubmittedRows,
+    classifiedAcademicSchoolCodes(academicSubmissions),
+    directorsBySchool,
+    (code, director) => director.school || code
+  );
+  appendUnclassifiedAccounts(
+    adminInternal.notSubmittedRows,
+    classifiedAdministrativePostCodes(administrativeSubmissions),
+    adminUsersByPost,
+    (code) => ADMINISTRATIVE_POSTS.find((post) => post.value === code)?.label || code
+  );
+
+  const internalAuditor = auditorAccountCoverage(users, "internal", academicSubmissions, administrativeSubmissions);
+  const externalAuditor = auditorAccountCoverage(users, "external", academicSubmissions, administrativeSubmissions);
+
+  const allSubmissionsForApproval = [...academicSubmissions, ...administrativeSubmissions];
+  const forwardInternalCount = pendingForwardCount(academicSubmissions, administrativeSubmissions, "internal");
+  const forwardExternalCount = pendingForwardCount(academicSubmissions, administrativeSubmissions, "external");
+  const approveInternalCount = pendingApproveCount(allSubmissionsForApproval, "internal");
+  const approveExternalCount = pendingApproveCount(allSubmissionsForApproval, "external");
 
   const showList = (title, secondaryLabel, showDate, rows, submittedCount, totalCount) => {
     setActiveModal({ title, secondaryLabel, showDate, submitted: submittedCount, total: totalCount, rows });
   };
 
-  const breakdownPills = (label, coverage, secondaryLabel) => {
+  const breakdownPills = (
+    label,
+    coverage,
+    secondaryLabel,
+    notSubmittedLabel = `${label} Not Submitted`,
+    submittedLabel = `${label} Submitted`
+  ) => {
     const total = coverage.submittedRows.length + coverage.notSubmittedRows.length;
     return [
       {
-        label: `${label} Submitted`,
+        label: submittedLabel,
         value: coverage.submittedRows.length,
-        onClick: () => showList(`${label} submitted`, secondaryLabel, true, coverage.submittedRows, coverage.submittedRows.length, total),
+        onClick: () => showList(submittedLabel, secondaryLabel, true, coverage.submittedRows, coverage.submittedRows.length, total),
       },
       {
-        label: `${label} Not Submitted`,
+        label: notSubmittedLabel,
         value: coverage.notSubmittedRows.length,
-        onClick: () => showList(`${label} not submitted`, secondaryLabel, false, coverage.notSubmittedRows, coverage.submittedRows.length, total),
+        onClick: () => showList(notSubmittedLabel, secondaryLabel, false, coverage.notSubmittedRows, coverage.submittedRows.length, total),
       },
     ];
   };
@@ -2862,17 +2994,44 @@ function AcademicAdministrativeSubmissionsPanel({ academicSubmissions = [], admi
   return (
     <section style={styles.panel}>
       <div className="app-surface-card" style={styles.submissionsOverviewCard}>
+        <h2 style={styles.submissionsOverviewTitle}>IQAC Forward and Approve</h2>
+        <div style={styles.submissionsOverviewGrid}>
+          <SubmissionStatCard
+            eyebrow="Forward"
+            title="Auditor Forward"
+            tone="auditor"
+            pills={[
+              { label: "Internal Auditor Forward", value: forwardInternalCount },
+              { label: "External Auditor Forward", value: forwardExternalCount },
+            ]}
+          />
+          <SubmissionStatCard
+            eyebrow="Approve"
+            title="IQAC Review Approval"
+            tone="auditor"
+            pills={[
+              { label: "Approve Internal's Review", value: approveInternalCount },
+              { label: "Approve External's Review", value: approveExternalCount },
+            ]}
+          />
+        </div>
+      </div>
+
+      <div className="app-surface-card" style={styles.submissionsOverviewCard}>
         <h2 style={styles.submissionsOverviewTitle}>Academic &amp; administrative submissions</h2>
         <div style={styles.submissionsOverviewGrid}>
           <SubmissionStatCard
             eyebrow="Academic"
             title="Schools"
             tone="academic"
-            pills={[...breakdownPills("Internal", schoolsInternal, "School"), ...breakdownPills("External", schoolsExternal, "School")]}
+            pills={[
+              ...breakdownPills("Internal", schoolsInternal, "School", "Director Internal Cycle Not Submitted", "Director Internal Cycle Submitted"),
+              ...breakdownPills("External", schoolsExternal, "School", "Director External Cycle Not Submitted", "Director External Cycle Submitted"),
+            ]}
           />
           <SubmissionStatCard
             eyebrow="Administrative"
-            title="Admin. post"
+            title="Administrative Posts"
             tone="administrative"
             pills={[...breakdownPills("Internal", adminInternal, "Designation"), ...breakdownPills("External", adminExternal, "Designation")]}
           />
@@ -5250,21 +5409,16 @@ const styles = {
   submissionStatCard: {
     borderRadius: 16,
     padding: "16px 18px",
-    border: "1px solid transparent",
-    boxShadow: "0 10px 24px rgba(15, 23, 42, .08)",
+    background: "#DBEAFE",
+    border: "1.5px solid #2055DE",
+    boxShadow: "0 10px 24px rgba(15, 23, 42, .06)",
   },
-  "submissionStatCard--academic": {
-    background: "linear-gradient(150deg, #0f5f52 0%, #0d3f38 100%)",
-  },
-  "submissionStatCard--administrative": {
-    background: "linear-gradient(150deg, #4c1d95 0%, #2e1065 100%)",
-  },
-  "submissionStatCard--auditor": {
-    background: "linear-gradient(150deg, #1e3a8a 0%, #172554 100%)",
-  },
+  "submissionStatCard--academic": {},
+  "submissionStatCard--administrative": {},
+  "submissionStatCard--auditor": {},
   submissionStatEyebrow: {
     display: "block",
-    color: "rgba(255,255,255,.62)",
+    color: "#2055DE",
     fontSize: 10,
     fontWeight: 800,
     letterSpacing: ".1em",
@@ -5273,7 +5427,7 @@ const styles = {
   },
   submissionStatTitle: {
     display: "block",
-    color: "#fff",
+    color: "#0f172a",
     fontSize: 14,
     fontWeight: 750,
     marginBottom: 14,
@@ -5287,34 +5441,35 @@ const styles = {
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
-    gap: 4,
-    padding: "12px 6px",
-    borderRadius: 12,
-    background: "rgba(0,0,0,.32)",
+    gap: 2,
+    padding: "8px 6px",
+    borderRadius: 10,
+    background: "#2055DE",
     color: "#fff",
     textAlign: "center",
   },
   submissionStatValue: {
-    fontSize: 20,
+    color: "#fff",
+    fontSize: 16,
     fontWeight: 800,
     lineHeight: 1,
   },
   submissionStatLabel: {
-    fontSize: 9.5,
+    fontSize: 9,
     fontWeight: 650,
     letterSpacing: ".02em",
-    color: "#e2e8f0",
+    color: "#fff",
     lineHeight: 1.3,
   },
   submissionStatPillButton: {
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
-    gap: 4,
-    padding: "12px 6px",
-    borderRadius: 12,
+    gap: 2,
+    padding: "8px 6px",
+    borderRadius: 10,
     border: "none",
-    background: "rgba(0,0,0,.32)",
+    background: "#2055DE",
     color: "#fff",
     textAlign: "center",
     cursor: "pointer",
@@ -5327,8 +5482,8 @@ const styles = {
     display: "flex",
     flexDirection: "column",
     gap: 16,
-    background: "#181b20",
-    border: "1px solid #2c2f36",
+    background: "#182134",
+    border: "1px solid #3e4147",
     borderRadius: 16,
     padding: "22px 24px",
     boxShadow: "0 24px 60px rgba(0,0,0,.45)",
