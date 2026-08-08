@@ -1428,8 +1428,12 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
       return auditItems;
     }
 
+    if (isIqacDashboard) {
+      return REVIEW_NAV_ITEMS.filter((item) => item.id !== "advanced-overview");
+    }
+
     return REVIEW_NAV_ITEMS;
-  }, [isAuditor, profile.category]);
+  }, [isAuditor, isIqacDashboard, profile.category]);
   const pinnedNavigationItems = useMemo(() => {
     if (isAuditor || !canManageUsers) return [];
     return [USER_MANAGEMENT_NAV_ITEM];
@@ -2332,6 +2336,11 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
               showPreviousAuditorReference={isAuditor && profile.auditorType === "external"}
               currentProfile={profile}
             />
+          ) : visibleActiveView === "overview" && isIqacDashboard ? (
+            <AcademicAdministrativeSubmissionsPanel
+              academicSubmissions={submissions.academic}
+              administrativeSubmissions={submissions.administrative}
+            />
           ) : visibleActiveView === "overview" ? (
             <OverviewPanel
               metrics={metrics}
@@ -2559,6 +2568,264 @@ function buildSchoolProgress(submissions) {
   });
 
   return Object.values(schoolMap).sort((a, b) => b.total - a.total || a.school.localeCompare(b.school));
+}
+
+function usersForCategory(users = [], category) {
+  return users.filter((user) => user.category === category && !String(user.role || user.accountType || "").includes("auditor"));
+}
+
+function mapUsersBySchool(users = []) {
+  const map = {};
+  users.forEach((user) => {
+    const codes = user.schools.length ? user.schools : [canonicalSchoolCode(user.school)];
+    codes.filter(Boolean).forEach((code) => {
+      if (!map[code]) map[code] = user;
+    });
+  });
+  return map;
+}
+
+function mapUsersByPost(users = []) {
+  const map = {};
+  users.forEach((user) => {
+    user.administrativePosts.forEach((post) => {
+      if (!map[post]) map[post] = user;
+    });
+  });
+  return map;
+}
+
+function resolvedAuditorTypeFor(submission = {}) {
+  return normalizeUserRole(
+    submission.forwardedAuditorType ||
+    auditorTypeForReportCategory(submission.reportCategory) ||
+    ""
+  );
+}
+
+function auditorTypeCoverage(submissions = [], auditorType) {
+  const relevant = submissions.filter((submission) => resolvedAuditorTypeFor(submission) === auditorType);
+  const submitted = relevant.filter((submission) => isAuditorCompleted(submission)).length;
+  return { submitted, notSubmitted: Math.max(relevant.length - submitted, 0) };
+}
+
+function auditorTypeCoverageWithRows(submissions = [], auditorType, resolveContact) {
+  const relevant = submissions.filter((submission) => resolvedAuditorTypeFor(submission) === auditorType);
+  const submittedRows = [];
+  const notSubmittedRows = [];
+
+  relevant.forEach((submission) => {
+    const contact = resolveContact(submission) || {};
+    const completed = isAuditorCompleted(submission);
+    const row = {
+      name: submission.submittedBy || contact.name || "-",
+      email: contact.email || "-",
+      secondary: contact.secondary || "-",
+      date: completed ? submission.auditorReviewedOn || submission.submittedOn : null,
+    };
+    (completed ? submittedRows : notSubmittedRows).push(row);
+  });
+
+  return { submittedRows, notSubmittedRows };
+}
+
+function SubmissionStatCard({ eyebrow, title, tone, pills }) {
+  return (
+    <div className="app-surface-card" style={{ ...styles.submissionStatCard, ...styles[`submissionStatCard--${tone}`] }}>
+      {eyebrow && <span style={styles.submissionStatEyebrow}>{eyebrow}</span>}
+      <span style={styles.submissionStatTitle}>{title}</span>
+      <div style={styles.submissionStatPills}>
+        {pills.map((pill) => (
+          pill.onClick ? (
+            <button key={pill.label} type="button" style={styles.submissionStatPillButton} onClick={pill.onClick}>
+              <strong style={styles.submissionStatValue}>{pill.value}</strong>
+              <small style={styles.submissionStatLabel}>{pill.label}</small>
+            </button>
+          ) : (
+            <span key={pill.label} style={styles.submissionStatPill}>
+              <strong style={styles.submissionStatValue}>{pill.value}</strong>
+              <small style={styles.submissionStatLabel}>{pill.label}</small>
+            </span>
+          )
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SubmissionListModal({ title, secondaryLabel, showDate, submitted, total, rows, onClose }) {
+  return (
+    <div style={styles.modalBackdrop} onClick={onClose}>
+      <div
+        style={styles.submissionListModal}
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="submission-list-title"
+      >
+        <div style={styles.submissionListHeader}>
+          <h3 id="submission-list-title" style={styles.submissionListTitle}>{title}</h3>
+          <span style={styles.submissionListBadge}>{submitted} of {total} submitted</span>
+        </div>
+        <div style={styles.submissionListTableWrap}>
+          <table style={styles.submissionListTable}>
+            <thead>
+              <tr>
+                <th style={styles.submissionListTh}>Name</th>
+                <th style={styles.submissionListTh}>Email</th>
+                <th style={styles.submissionListTh}>{secondaryLabel}</th>
+                {showDate && <th style={styles.submissionListTh}>Submitted on</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {!rows.length && (
+                <tr>
+                  <td style={styles.submissionListTd} colSpan={showDate ? 4 : 3}>No records to show.</td>
+                </tr>
+              )}
+              {rows.map((row, index) => (
+                <tr key={`${row.email}-${index}`}>
+                  <td style={{ ...styles.submissionListTd, ...styles.submissionListTdStrong }}>{row.name || "-"}</td>
+                  <td style={styles.submissionListTd}>{row.email || "-"}</td>
+                  <td style={styles.submissionListTd}>{row.secondary || "-"}</td>
+                  {showDate && <td style={styles.submissionListTd}>{formatDate(row.date)}</td>}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <button type="button" className="btn btn-secondary" style={styles.submissionListClose} onClick={onClose}>
+          Close
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function AcademicAdministrativeSubmissionsPanel({ academicSubmissions = [], administrativeSubmissions = [] }) {
+  const [users, setUsers] = useState([]);
+  const [activeModal, setActiveModal] = useState(null);
+
+  useEffect(() => {
+    let isActive = true;
+    fetchUsers()
+      .then(({ data }) => {
+        if (isActive) setUsers(userList(data).map(normalizeAuditor));
+      })
+      .catch(() => {
+        if (isActive) setUsers([]);
+      });
+    return () => {
+      isActive = false;
+    };
+  }, []);
+
+  const allAuditSubmissions = useMemo(
+    () => [...academicSubmissions, ...administrativeSubmissions],
+    [academicSubmissions, administrativeSubmissions]
+  );
+  const directorsBySchool = useMemo(() => mapUsersBySchool(usersForCategory(users, "academic")), [users]);
+  const adminUsersByPost = useMemo(() => mapUsersByPost(usersForCategory(users, "administrative")), [users]);
+
+  const resolveSchoolContact = (submission) => {
+    const code = canonicalSchoolCode(submission.school) || String(submission.school || "").trim().toUpperCase();
+    const director = directorsBySchool[code];
+    return { name: director?.name, email: director?.email, secondary: submission.school || director?.school || code };
+  };
+  const resolveAdminContact = (submission) => {
+    const postCode = canonicalAdministrativePost(submission.post || submission.department || submission.school);
+    const adminUser = adminUsersByPost[postCode];
+    return {
+      name: adminUser?.name,
+      email: adminUser?.email,
+      secondary: submission.submittedByDesignation || ADMINISTRATIVE_POSTS.find((post) => post.value === postCode)?.label || postCode,
+    };
+  };
+
+  const schoolsInternal = auditorTypeCoverageWithRows(academicSubmissions, "internal", resolveSchoolContact);
+  const schoolsExternal = auditorTypeCoverageWithRows(academicSubmissions, "external", resolveSchoolContact);
+  const adminInternal = auditorTypeCoverageWithRows(administrativeSubmissions, "internal", resolveAdminContact);
+  const adminExternal = auditorTypeCoverageWithRows(administrativeSubmissions, "external", resolveAdminContact);
+  const internalAuditor = auditorTypeCoverage(allAuditSubmissions, "internal");
+  const externalAuditor = auditorTypeCoverage(allAuditSubmissions, "external");
+
+  const showList = (title, secondaryLabel, showDate, rows, submittedCount, totalCount) => {
+    setActiveModal({ title, secondaryLabel, showDate, submitted: submittedCount, total: totalCount, rows });
+  };
+
+  const breakdownPills = (label, coverage, secondaryLabel) => {
+    const total = coverage.submittedRows.length + coverage.notSubmittedRows.length;
+    return [
+      {
+        label: `${label} Submitted`,
+        value: coverage.submittedRows.length,
+        onClick: () => showList(`${label} submitted`, secondaryLabel, true, coverage.submittedRows, coverage.submittedRows.length, total),
+      },
+      {
+        label: `${label} Not Submitted`,
+        value: coverage.notSubmittedRows.length,
+        onClick: () => showList(`${label} not submitted`, secondaryLabel, false, coverage.notSubmittedRows, coverage.submittedRows.length, total),
+      },
+    ];
+  };
+
+  return (
+    <section style={styles.panel}>
+      <div className="app-surface-card" style={styles.submissionsOverviewCard}>
+        <h2 style={styles.submissionsOverviewTitle}>Academic &amp; administrative submissions</h2>
+        <div style={styles.submissionsOverviewGrid}>
+          <SubmissionStatCard
+            eyebrow="Academic"
+            title="Schools"
+            tone="academic"
+            pills={[...breakdownPills("Internal", schoolsInternal, "School"), ...breakdownPills("External", schoolsExternal, "School")]}
+          />
+          <SubmissionStatCard
+            eyebrow="Administrative"
+            title="Admin. post"
+            tone="administrative"
+            pills={[...breakdownPills("Internal", adminInternal, "Designation"), ...breakdownPills("External", adminExternal, "Designation")]}
+          />
+        </div>
+      </div>
+
+      <div className="app-surface-card" style={styles.submissionsOverviewCard}>
+        <h2 style={styles.submissionsOverviewTitle}>Auditor&apos;s Submissions</h2>
+        <div style={styles.submissionsOverviewGrid}>
+          <SubmissionStatCard
+            eyebrow="Auditors"
+            title="Internal auditor"
+            tone="auditor"
+            pills={[
+              { label: "Submitted", value: internalAuditor.submitted },
+              { label: "Not submitted", value: internalAuditor.notSubmitted },
+            ]}
+          />
+          <SubmissionStatCard
+            eyebrow="Auditors"
+            title="External auditor"
+            tone="auditor"
+            pills={[
+              { label: "Submitted", value: externalAuditor.submitted },
+              { label: "Not submitted", value: externalAuditor.notSubmitted },
+            ]}
+          />
+        </div>
+      </div>
+
+      {activeModal && (
+        <SubmissionListModal
+          title={activeModal.title}
+          secondaryLabel={activeModal.secondaryLabel}
+          showDate={activeModal.showDate}
+          submitted={activeModal.submitted}
+          total={activeModal.total}
+          rows={activeModal.rows}
+          onClose={() => setActiveModal(null)}
+        />
+      )}
+    </section>
+  );
 }
 
 function AdvancedOverviewPanel({ metrics, submissions, loading }) {
@@ -4877,6 +5144,167 @@ const styles = {
   overviewHeroPill: { padding: "6px 9px", border: "1px solid rgba(255,255,255,.16)", borderRadius: 999, color: "#e0f2fe", background: "rgba(255,255,255,.08)", fontSize: 10, fontWeight: 700 },
   approvalRing: { position: "relative", zIndex: 1, width: 118, height: 118, flex: "0 0 118px", display: "grid", placeItems: "center", borderRadius: "50%", boxShadow: "0 12px 30px rgba(15,23,42,.24)" },
   approvalRingInner: { width: 88, height: 88, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", borderRadius: "50%", color: "#fff", background: "#17233b" },
+  submissionsOverviewCard: {
+    border: "1px solid #e2e8f0",
+    borderRadius: 18,
+    background: "#fff",
+    padding: "26px 28px",
+    boxShadow: "0 14px 34px rgba(15, 23, 42, .05)",
+  },
+  submissionsOverviewTitle: {
+    margin: "0 0 20px",
+    color: "#0f172a",
+    fontSize: 19,
+    fontWeight: 750,
+    letterSpacing: "-.01em",
+  },
+  submissionsOverviewGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, 1fr)",
+    gap: 18,
+  },
+  submissionStatCard: {
+    borderRadius: 16,
+    padding: "16px 18px",
+    border: "1px solid transparent",
+    boxShadow: "0 10px 24px rgba(15, 23, 42, .08)",
+  },
+  "submissionStatCard--academic": {
+    background: "linear-gradient(150deg, #0f5f52 0%, #0d3f38 100%)",
+  },
+  "submissionStatCard--administrative": {
+    background: "linear-gradient(150deg, #4c1d95 0%, #2e1065 100%)",
+  },
+  "submissionStatCard--auditor": {
+    background: "linear-gradient(150deg, #1e3a8a 0%, #172554 100%)",
+  },
+  submissionStatEyebrow: {
+    display: "block",
+    color: "rgba(255,255,255,.62)",
+    fontSize: 10,
+    fontWeight: 800,
+    letterSpacing: ".1em",
+    textTransform: "uppercase",
+    marginBottom: 4,
+  },
+  submissionStatTitle: {
+    display: "block",
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: 750,
+    marginBottom: 14,
+  },
+  submissionStatPills: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, 1fr)",
+    gap: 8,
+  },
+  submissionStatPill: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: 4,
+    padding: "12px 6px",
+    borderRadius: 12,
+    background: "rgba(0,0,0,.32)",
+    color: "#fff",
+    textAlign: "center",
+  },
+  submissionStatValue: {
+    fontSize: 20,
+    fontWeight: 800,
+    lineHeight: 1,
+  },
+  submissionStatLabel: {
+    fontSize: 9.5,
+    fontWeight: 650,
+    letterSpacing: ".02em",
+    color: "#e2e8f0",
+    lineHeight: 1.3,
+  },
+  submissionStatPillButton: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: 4,
+    padding: "12px 6px",
+    borderRadius: 12,
+    border: "none",
+    background: "rgba(0,0,0,.32)",
+    color: "#fff",
+    textAlign: "center",
+    cursor: "pointer",
+    fontFamily: "inherit",
+    transition: "background .15s ease, transform .15s ease",
+  },
+  submissionListModal: {
+    width: "min(760px, 94vw)",
+    maxHeight: "86vh",
+    display: "flex",
+    flexDirection: "column",
+    gap: 16,
+    background: "#181b20",
+    border: "1px solid #2c2f36",
+    borderRadius: 16,
+    padding: "22px 24px",
+    boxShadow: "0 24px 60px rgba(0,0,0,.45)",
+  },
+  submissionListHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  submissionListTitle: {
+    margin: 0,
+    color: "#fff",
+    fontSize: 17,
+    fontWeight: 750,
+  },
+  submissionListBadge: {
+    flexShrink: 0,
+    padding: "6px 12px",
+    borderRadius: 999,
+    background: "rgba(34, 197, 94, .18)",
+    border: "1px solid rgba(74, 222, 128, .35)",
+    color: "#4ade80",
+    fontSize: 11.5,
+    fontWeight: 750,
+  },
+  submissionListTableWrap: {
+    overflow: "auto",
+    borderRadius: 10,
+    border: "1px solid #2c2f36",
+  },
+  submissionListTable: {
+    width: "100%",
+    borderCollapse: "collapse",
+    fontSize: 13,
+  },
+  submissionListTh: {
+    textAlign: "left",
+    padding: "10px 14px",
+    color: "#8b93a1",
+    fontSize: 11,
+    fontWeight: 700,
+    textTransform: "uppercase",
+    letterSpacing: ".04em",
+    borderBottom: "1px solid #2c2f36",
+    whiteSpace: "nowrap",
+  },
+  submissionListTd: {
+    padding: "12px 14px",
+    color: "#cbd5e1",
+    borderBottom: "1px solid #23262d",
+    whiteSpace: "nowrap",
+  },
+  submissionListTdStrong: {
+    color: "#fff",
+    fontWeight: 700,
+  },
+  submissionListClose: {
+    alignSelf: "flex-end",
+  },
   blueHeading: {
     padding: "0 0 15px",
     borderBottom: "1px solid #edf1f6",
