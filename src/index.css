@@ -528,6 +528,7 @@ textarea:disabled {
 .generated-report__cover { break-inside: avoid; page-break-inside: avoid; }
 .app-surface-card { transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease; }
 .app-surface-card:hover { border-color: #cbd5e1 !important; box-shadow: 0 14px 34px rgba(15, 23, 42, .075) !important; transform: translateY(-1px); }
+.app-surface-card.submission-stat-card:hover { border-color: #2055DE !important; }
 .review-metric-card { position: relative; overflow: hidden; }
 .review-metric-card::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: linear-gradient(180deg, #2563eb, #38bdf8); }
 .review-queue-item { transition: border-color .15s ease, background .15s ease, transform .15s ease; }
