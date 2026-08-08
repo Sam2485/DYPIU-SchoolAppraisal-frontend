@@ -2603,10 +2603,84 @@ function resolvedAuditorTypeFor(submission = {}) {
   );
 }
 
-function auditorTypeCoverage(submissions = [], auditorType) {
-  const relevant = submissions.filter((submission) => resolvedAuditorTypeFor(submission) === auditorType);
-  const submitted = relevant.filter((submission) => isAuditorCompleted(submission)).length;
-  return { submitted, notSubmitted: Math.max(relevant.length - submitted, 0) };
+function secondaryForSubmission(submission = {}) {
+  if (submission.auditType === "academic") {
+    return canonicalSchoolCode(submission.school) || submission.school || "-";
+  }
+  const postCode = canonicalAdministrativePost(submission.post || submission.department || submission.school);
+  return ADMINISTRATIVE_POSTS.find((post) => post.value === postCode)?.label || submission.submittedByDesignation || submission.post || submission.school || "-";
+}
+
+function secondaryForAssignment(assignment = {}) {
+  if (assignment.post) {
+    return ADMINISTRATIVE_POSTS.find((post) => post.value === assignment.post)?.label || assignment.post;
+  }
+  return assignment.school || "-";
+}
+
+function groupRowsByAuditor(rows = []) {
+  const map = new Map();
+  rows.forEach((row) => {
+    const key = (row.email && row.email !== "-" ? row.email : row.name || "").toLowerCase();
+    const existing = map.get(key);
+    if (!existing) {
+      map.set(key, { name: row.name, email: row.email, secondaries: row.secondary ? [row.secondary] : [], date: row.date || null });
+      return;
+    }
+    if (row.secondary && !existing.secondaries.includes(row.secondary)) existing.secondaries.push(row.secondary);
+    if (row.date && (!existing.date || row.date > existing.date)) existing.date = row.date;
+  });
+  return [...map.values()].map((entry) => ({
+    name: entry.name,
+    email: entry.email,
+    secondary: entry.secondaries.join(", ") || "-",
+    date: entry.date,
+  }));
+}
+
+function auditorPersonCoverage(submissions = [], auditorType) {
+  const submittedRows = [];
+  const notSubmittedRows = [];
+
+  submissions.forEach((submission) => {
+    const assignments = (submission.auditorAssignments || []).filter((assignment) => assignment.auditorType === auditorType);
+
+    if (assignments.length) {
+      assignments.forEach((assignment) => {
+        const row = {
+          name: assignment.auditorName || "-",
+          email: assignment.auditorEmail || "-",
+          secondary: secondaryForAssignment(assignment),
+          date: assignment.submittedAt,
+        };
+        if (auditorAssignmentSubmitted(assignment)) submittedRows.push(row);
+        else notSubmittedRows.push({ ...row, date: null });
+      });
+      return;
+    }
+
+    if (resolvedAuditorTypeFor(submission) !== auditorType) return;
+    const secondary = secondaryForSubmission(submission);
+    if (isAuditorCompleted(submission)) {
+      submittedRows.push({
+        name: submission.auditorReviewedBy || "-",
+        email: submission.auditorReviewedByEmail || "-",
+        secondary,
+        date: submission.auditorReviewedOn,
+      });
+    } else {
+      const assignedName = submission.forwardedToAuditorNames?.length ? submission.forwardedToAuditorNames.join(", ") : submission.forwardedToAuditorName;
+      const assignedEmail = submission.forwardedToAuditorEmails?.length ? submission.forwardedToAuditorEmails.join(", ") : submission.forwardedToAuditorEmail;
+      notSubmittedRows.push({
+        name: assignedName || "Not assigned",
+        email: assignedEmail || "-",
+        secondary,
+        date: null,
+      });
+    }
+  });
+
+  return { submittedRows: groupRowsByAuditor(submittedRows), notSubmittedRows: groupRowsByAuditor(notSubmittedRows) };
 }
 
 function auditorTypeCoverageWithRows(submissions = [], auditorType, resolveContact) {
@@ -2746,8 +2820,8 @@ function AcademicAdministrativeSubmissionsPanel({ academicSubmissions = [], admi
   const schoolsExternal = auditorTypeCoverageWithRows(academicSubmissions, "external", resolveSchoolContact);
   const adminInternal = auditorTypeCoverageWithRows(administrativeSubmissions, "internal", resolveAdminContact);
   const adminExternal = auditorTypeCoverageWithRows(administrativeSubmissions, "external", resolveAdminContact);
-  const internalAuditor = auditorTypeCoverage(allAuditSubmissions, "internal");
-  const externalAuditor = auditorTypeCoverage(allAuditSubmissions, "external");
+  const internalAuditor = auditorPersonCoverage(allAuditSubmissions, "internal");
+  const externalAuditor = auditorPersonCoverage(allAuditSubmissions, "external");
 
   const showList = (title, secondaryLabel, showDate, rows, submittedCount, totalCount) => {
     setActiveModal({ title, secondaryLabel, showDate, submitted: submittedCount, total: totalCount, rows });
@@ -2765,6 +2839,22 @@ function AcademicAdministrativeSubmissionsPanel({ academicSubmissions = [], admi
         label: `${label} Not Submitted`,
         value: coverage.notSubmittedRows.length,
         onClick: () => showList(`${label} not submitted`, secondaryLabel, false, coverage.notSubmittedRows, coverage.submittedRows.length, total),
+      },
+    ];
+  };
+
+  const simplePills = (title, coverage, secondaryLabel) => {
+    const total = coverage.submittedRows.length + coverage.notSubmittedRows.length;
+    return [
+      {
+        label: "Submitted",
+        value: coverage.submittedRows.length,
+        onClick: () => showList(`${title} submitted`, secondaryLabel, true, coverage.submittedRows, coverage.submittedRows.length, total),
+      },
+      {
+        label: "Not submitted",
+        value: coverage.notSubmittedRows.length,
+        onClick: () => showList(`${title} not submitted`, secondaryLabel, false, coverage.notSubmittedRows, coverage.submittedRows.length, total),
       },
     ];
   };
@@ -2796,19 +2886,13 @@ function AcademicAdministrativeSubmissionsPanel({ academicSubmissions = [], admi
             eyebrow="Auditors"
             title="Internal auditor"
             tone="auditor"
-            pills={[
-              { label: "Submitted", value: internalAuditor.submitted },
-              { label: "Not submitted", value: internalAuditor.notSubmitted },
-            ]}
+            pills={simplePills("Internal auditor", internalAuditor, "School/Post")}
           />
           <SubmissionStatCard
             eyebrow="Auditors"
             title="External auditor"
             tone="auditor"
-            pills={[
-              { label: "Submitted", value: externalAuditor.submitted },
-              { label: "Not submitted", value: externalAuditor.notSubmitted },
-            ]}
+            pills={simplePills("External auditor", externalAuditor, "School/Post")}
           />
         </div>
       </div>
@@ -5238,7 +5322,7 @@ const styles = {
     transition: "background .15s ease, transform .15s ease",
   },
   submissionListModal: {
-    width: "min(760px, 94vw)",
+    width: "min(980px, 96vw)",
     maxHeight: "86vh",
     display: "flex",
     flexDirection: "column",
@@ -5296,7 +5380,7 @@ const styles = {
     padding: "12px 14px",
     color: "#cbd5e1",
     borderBottom: "1px solid #23262d",
-    whiteSpace: "nowrap",
+    wordBreak: "break-word",
   },
   submissionListTdStrong: {
     color: "#fff",
