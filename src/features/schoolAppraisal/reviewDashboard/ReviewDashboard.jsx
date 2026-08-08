@@ -3001,8 +3001,8 @@ function AcademicAdministrativeSubmissionsPanel({ academicSubmissions = [], admi
             title="Auditor Forward"
             tone="auditor"
             pills={[
-              { label: "Internal Auditor Forward", value: forwardInternalCount },
-              { label: "External Auditor Forward", value: forwardExternalCount },
+              { label: "Pending Forwards to Internal auditor", value: forwardInternalCount },
+              { label: "Pending Forwards to External auditor", value: forwardExternalCount },
             ]}
           />
           <SubmissionStatCard
@@ -3010,8 +3010,8 @@ function AcademicAdministrativeSubmissionsPanel({ academicSubmissions = [], admi
             title="IQAC Review Approval"
             tone="auditor"
             pills={[
-              { label: "Approve Internal's Review", value: approveInternalCount },
-              { label: "Approve External's Review", value: approveExternalCount },
+              { label: "Pending Approvals for Internal's review", value: approveInternalCount },
+              { label: "Pending Approvals for External's review", value: approveExternalCount },
             ]}
           />
         </div>
