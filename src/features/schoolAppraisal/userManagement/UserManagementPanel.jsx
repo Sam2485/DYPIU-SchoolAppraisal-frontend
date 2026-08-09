@@ -736,7 +736,18 @@ export default function UserManagementPanel() {
                 <tr><td colSpan="8" style={styles.emptyCell}><LoadingState label="Loading user accounts..." compact /></td></tr>
               ) : filteredUsers.length ? filteredUsers.map((user) => (
                 <tr key={user.id}>
-                  <td style={styles.td}><strong>{user.name}</strong></td>
+                  <td style={styles.td}>
+                    <div style={styles.nameCell}>
+                      <span style={styles.tableAvatar}>
+                        {user.avatarUrl ? (
+                          <img src={user.avatarUrl} alt="" style={styles.tableAvatarImg} />
+                        ) : (
+                          user.name?.charAt(0)?.toUpperCase() || "U"
+                        )}
+                      </span>
+                      <strong>{user.name}</strong>
+                    </div>
+                  </td>
                   <td style={styles.td}>{user.email}</td>
                   <td style={{ ...styles.td, ...styles.centerCell }}>
                     <span style={user.accountType === "auditor" ? styles.auditorPill : styles.userPill}>
@@ -1253,6 +1264,9 @@ const styles = {
   table: { width: "100%", borderCollapse: "collapse", tableLayout: "fixed" },
   th: { padding: "10px 11px", borderRight: "1px solid #3a465b", color: "#f8fafc", background: "#1e293b", fontSize: 11.5, fontWeight: 700, textAlign: "left" },
   td: { padding: "11px", borderRight: "1px solid #dfe5ec", borderBottom: "1px solid #dfe5ec", color: "#334155", fontSize: 12, overflowWrap: "anywhere" },
+  nameCell: { display: "flex", alignItems: "center", gap: 9 },
+  tableAvatar: { width: 26, height: 26, flex: "0 0 26px", display: "grid", placeItems: "center", overflow: "hidden", borderRadius: "50%", color: "#fff", background: "linear-gradient(135deg, #2563eb, #0ea5e9)", fontSize: 10.5, fontWeight: 800 },
+  tableAvatarImg: { width: "100%", height: "100%", objectFit: "cover" },
   centerCell: { textAlign: "center", verticalAlign: "middle" },
   actionCell: { width: 96, textAlign: "center" },
   emptyCell: { padding: 28, color: "#64748b", fontSize: 12, textAlign: "center" },
