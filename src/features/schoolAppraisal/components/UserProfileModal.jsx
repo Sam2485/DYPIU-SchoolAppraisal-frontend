@@ -85,8 +85,8 @@ function ChangePasswordSection() {
       </button>
 
       {expanded && (
-        <div style={{ ...styles.profileModalFields, marginTop: 14, marginBottom: 0 }}>
-          <label style={styles.readOnlyField}>
+        <div style={{ ...styles.passwordFieldsGrid, marginTop: 14 }}>
+          <label style={{ ...styles.readOnlyField, gridColumn: "1 / -1" }}>
             <span style={styles.readOnlyLabel}>Current password</span>
             <input
               style={styles.editableInput}
@@ -117,10 +117,15 @@ function ChangePasswordSection() {
             />
           </label>
 
-          {error && <p style={styles.profileModalError}>{error}</p>}
-          {success && <p style={styles.passwordSuccessText}>{success}</p>}
+          {error && <p style={{ ...styles.profileModalError, gridColumn: "1 / -1" }}>{error}</p>}
+          {success && <p style={{ ...styles.passwordSuccessText, gridColumn: "1 / -1" }}>{success}</p>}
 
-          <button type="button" style={styles.saveButton} onClick={handleUpdatePassword} disabled={saving}>
+          <button
+            type="button"
+            style={{ ...styles.saveButton, gridColumn: "1 / -1" }}
+            onClick={handleUpdatePassword}
+            disabled={saving}
+          >
             {saving ? "Updating..." : "Update password"}
           </button>
         </div>
@@ -259,7 +264,9 @@ const styles = {
     padding: 18,
   },
   profileModal: {
-    width: "min(420px, 92vw)",
+    width: "min(600px, 95vw)",
+    maxHeight: "90vh",
+    overflowY: "auto",
     background: "#fff",
     borderRadius: 12,
     padding: "26px 28px",
@@ -314,10 +321,15 @@ const styles = {
     display: "none",
   },
   profileModalFields: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 14,
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "14px 16px",
     marginBottom: 18,
+  },
+  passwordFieldsGrid: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "14px 16px",
   },
   readOnlyField: {
     minWidth: 0,
