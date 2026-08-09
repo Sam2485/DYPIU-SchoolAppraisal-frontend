@@ -32,6 +32,7 @@ export default function AppSidebar({
   onChange,
   profile,
   onLogout,
+  onOpenProfile,
 }) {
   const activeItem = items.find((item) => item.id === activeId);
   const hasYearSelector = Boolean(onYearChange && availableYears?.length);
@@ -245,13 +246,40 @@ export default function AppSidebar({
         <span><small>Need help?</small><strong>appraisal@dypiu.ac.in</strong></span>
       </a>
 
-      <div className="app-sidebar__profile">
-        <div className="app-sidebar__avatar">{initialsFor(profile.name) || badge}</div>
+      <div
+        className="app-sidebar__profile"
+        role="button"
+        tabIndex={0}
+        onClick={() => onOpenProfile?.()}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onOpenProfile?.();
+          }
+        }}
+        aria-label="Open your profile"
+      >
+        <div className="app-sidebar__avatar">
+          {profile.avatarUrl ? (
+            <img className="app-sidebar__avatar-img" src={profile.avatarUrl} alt="" />
+          ) : (
+            initialsFor(profile.name) || badge
+          )}
+        </div>
         <div className="app-sidebar__profile-copy">
           <strong>{profile.name}</strong>
           <span>{profile.designation} - {profile.school}</span>
         </div>
-        <button type="button" className="app-sidebar__logout" onClick={onLogout} aria-label="Log out" title="Log out">
+        <button
+          type="button"
+          className="app-sidebar__logout"
+          onClick={(event) => {
+            event.stopPropagation();
+            onLogout();
+          }}
+          aria-label="Log out"
+          title="Log out"
+        >
           <LogoutIcon />
         </button>
       </div>

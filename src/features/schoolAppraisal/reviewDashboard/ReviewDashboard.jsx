@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { getApiErrorMessage } from "../../../api/client";
@@ -21,7 +21,7 @@ import {
   deleteAttachment,
   withApproverSignOff,
 } from "../../../api/submissions";
-import { fetchUsers } from "../../../api/users";
+import { fetchCurrentUser, fetchUsers, updateCurrentUser, uploadCurrentUserAvatar } from "../../../api/users";
 import universityLogo from "../../../assets/images/image.png";
 import AppSidebar from "../components/AppSidebar";
 import AuditReportPanel from "../components/AuditReportPanel";
@@ -1348,6 +1348,8 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
   const [reviewingStatus, setReviewingStatus] = useState("");
   const [error, setError] = useState("");
   const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [profileOverrides, setProfileOverrides] = useState({});
   const [auditors, setAuditors] = useState([]);
   const [loadingAuditors, setLoadingAuditors] = useState(false);
   const [forwardTarget, setForwardTarget] = useState(null);
@@ -1416,7 +1418,8 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
     ...(auditorProfile || {}),
     role,
     auditorRole: auditorProfile?.auditorRole || sessionProfile.auditorRole,
-  }), [auditorProfile, role, sessionProfile]);
+    ...profileOverrides,
+  }), [auditorProfile, role, sessionProfile, profileOverrides]);
 
   const allSubmissions = useMemo(() => [...submissions.academic, ...submissions.administrative], [submissions]);
   const metrics = useMemo(() => buildMetrics(allSubmissions), [allSubmissions]);
@@ -2284,6 +2287,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
           }}
           profile={profile}
           onLogout={() => setShowLogoutModal(true)}
+          onOpenProfile={() => setShowProfileModal(true)}
         />
 
         <main className="review-dashboard-main" style={styles.page}>
@@ -2459,6 +2463,17 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
           />
         )}
         {showLogoutModal && <LogoutModal onCancel={() => setShowLogoutModal(false)} onConfirm={handleLogout} />}
+        {showProfileModal && (
+          <UserProfileModal
+            profile={profile}
+            onClose={() => setShowProfileModal(false)}
+            onSaved={(updates) => {
+              if (updates.name) sessionStorage.setItem("name", updates.name);
+              if (updates.email) sessionStorage.setItem("email", updates.email);
+              setProfileOverrides((prev) => ({ ...prev, ...updates }));
+            }}
+          />
+        )}
       </div>
     </>
   );
@@ -2817,25 +2832,92 @@ function auditorTypeCoverageWithRows(submissions = [], auditorType, resolveConta
   return { submittedRows, notSubmittedRows };
 }
 
-function SubmissionStatCard({ eyebrow, title, tone, pills }) {
+const CARD_TONE_EYEBROW_COLOR = {
+  forward: "#2563eb",
+  approve: "#16a34a",
+  academic: "#2563eb",
+  administrative: "#2563eb",
+  auditors: "#2563eb",
+};
+
+const TILE_TONE_COLORS = {
+  blue: { bg: "#dbeafe", fg: "#2563eb" },
+  green: { bg: "#dcfce7", fg: "#16a34a" },
+  orange: { bg: "#ffedd5", fg: "#ea580c" },
+};
+
+function StatTileIcon({ name }) {
+  const common = { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, style: { width: 18, height: 18 } };
+  switch (name) {
+    case "person":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="8" r="3.6" />
+          <path d="M4.5 20c.6-4 3.8-6.5 7.5-6.5s6.9 2.5 7.5 6.5" />
+        </svg>
+      );
+    case "shield":
+      return (
+        <svg {...common}>
+          <path d="M12 3l7 2.6v5.4c0 4.6-3 8.4-7 9.6-4-1.2-7-5-7-9.6V5.6L12 3z" />
+        </svg>
+      );
+    case "checkCircle":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="8.6" />
+          <path d="M8.2 12.2l2.6 2.6 5-5.2" />
+        </svg>
+      );
+    case "clock":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="8.6" />
+          <path d="M12 7.4V12l3.2 1.9" />
+        </svg>
+      );
+    case "document":
+    default:
+      return (
+        <svg {...common}>
+          <path d="M6 2.75h8l4 4V21.25H6z" />
+          <path d="M14 2.75v4h4" />
+        </svg>
+      );
+  }
+}
+
+function SubmissionStatCard({ eyebrow, title, tone = "forward", pills }) {
+  const eyebrowColor = CARD_TONE_EYEBROW_COLOR[tone] || "#2563eb";
+  const defaultTileTone = tone === "approve" ? "green" : "blue";
   return (
-    <div className="app-surface-card submission-stat-card" style={{ ...styles.submissionStatCard, ...styles[`submissionStatCard--${tone}`] }}>
-      {eyebrow && <span style={styles.submissionStatEyebrow}>{eyebrow}</span>}
+    <div className="app-surface-card submission-stat-card" style={styles.submissionStatCard}>
+      {eyebrow && <span style={{ ...styles.submissionStatEyebrow, color: eyebrowColor }}>{eyebrow}</span>}
       <span style={styles.submissionStatTitle}>{title}</span>
       <div style={styles.submissionStatPills}>
-        {pills.map((pill) => (
-          pill.onClick ? (
-            <button key={pill.label} type="button" style={styles.submissionStatPillButton} onClick={pill.onClick}>
-              <strong style={styles.submissionStatValue}>{pill.value}</strong>
-              <small style={styles.submissionStatLabel}>{pill.label}</small>
+        {pills.map((pill) => {
+          const tileColors = TILE_TONE_COLORS[pill.tone] || TILE_TONE_COLORS[defaultTileTone];
+          const tileContent = (
+            <>
+              <span style={{ ...styles.statTileIcon, background: tileColors.bg, color: tileColors.fg }}>
+                <StatTileIcon name={pill.icon} />
+              </span>
+              <span style={styles.statTileText}>
+                <strong style={styles.submissionStatValue}>{pill.value}</strong>
+                <small style={styles.submissionStatLabel}>{pill.label}</small>
+              </span>
+            </>
+          );
+          return pill.onClick ? (
+            <button key={pill.label} type="button" className="stat-tile-button" style={styles.submissionStatPillButton} onClick={pill.onClick}>
+              {tileContent}
             </button>
           ) : (
             <span key={pill.label} style={styles.submissionStatPill}>
-              <strong style={styles.submissionStatValue}>{pill.value}</strong>
-              <small style={styles.submissionStatLabel}>{pill.label}</small>
+              {tileContent}
             </span>
-          )
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -3012,11 +3094,15 @@ function AcademicAdministrativeSubmissionsPanel({ academicSubmissions = [], admi
       {
         label: submittedLabel,
         value: coverage.submittedRows.length,
+        icon: "checkCircle",
+        tone: "green",
         onClick: () => showList(submittedLabel, secondaryLabel, true, coverage.submittedRows, coverage.submittedRows.length, total),
       },
       {
         label: notSubmittedLabel,
         value: coverage.notSubmittedRows.length,
+        icon: "clock",
+        tone: "orange",
         onClick: () => showList(notSubmittedLabel, secondaryLabel, false, coverage.notSubmittedRows, coverage.submittedRows.length, total),
       },
     ];
@@ -3028,79 +3114,105 @@ function AcademicAdministrativeSubmissionsPanel({ academicSubmissions = [], admi
       {
         label: "Submitted",
         value: coverage.submittedRows.length,
+        icon: "checkCircle",
+        tone: "green",
         onClick: () => showList(`${title} submitted`, secondaryLabel, true, coverage.submittedRows, coverage.submittedRows.length, total),
       },
       {
         label: "Not submitted",
         value: coverage.notSubmittedRows.length,
+        icon: "clock",
+        tone: "orange",
         onClick: () => showList(`${title} not submitted`, secondaryLabel, false, coverage.notSubmittedRows, coverage.submittedRows.length, total),
       },
     ];
   };
 
+  const today = new Date();
+  const todayLabel = today.toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" });
+  const weekdayLabel = today.toLocaleDateString("en-GB", { weekday: "long" });
+
   return (
     <section style={styles.panel}>
-      <div className="app-surface-card" style={styles.submissionsOverviewCard}>
-        <h2 style={styles.submissionsOverviewTitle}>IQAC Forward and Approve</h2>
-        <div style={styles.submissionsOverviewGrid}>
-          <SubmissionStatCard
-            eyebrow="Forward"
-            title="Auditor Forward"
-            tone="auditor"
-            pills={[
-              { label: "Pending Forwards to Internal auditor", value: forwardInternalCount },
-              { label: "Pending Forwards to External auditor", value: forwardExternalCount },
-            ]}
-          />
-          <SubmissionStatCard
-            eyebrow="Approve"
-            title="IQAC Review Approval"
-            tone="auditor"
-            pills={[
-              { label: "Pending Approvals for Internal's review", value: approveInternalCount },
-              { label: "Pending Approvals for External's review", value: approveExternalCount },
-            ]}
-          />
+      <div style={styles.iqacOverviewHeader}>
+        <div>
+          <h1 style={styles.iqacOverviewTitle}>IQAC Dashboard Overview</h1>
+          <p style={styles.iqacOverviewSubtitle}>Monitor forward items, approvals, submissions and auditor activities</p>
+        </div>
+        <div style={styles.iqacDateCard}>
+          <span style={styles.iqacDateIconWrap} aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" style={{ width: 18, height: 18 }}>
+              <rect x="3" y="4.5" width="18" height="16" rx="2" />
+              <path d="M16 2.5v4M8 2.5v4M3 10h18" />
+            </svg>
+          </span>
+          <span>
+            <strong style={styles.iqacDateStrong}>{todayLabel}</strong>
+            <small style={styles.iqacDateWeekday}>{weekdayLabel}</small>
+          </span>
         </div>
       </div>
 
-      <div className="app-surface-card" style={styles.submissionsOverviewCard}>
-        <h2 style={styles.submissionsOverviewTitle}>Academic &amp; administrative submissions</h2>
-        <div style={styles.submissionsOverviewGrid}>
-          <SubmissionStatCard
-            eyebrow="Academic"
-            title="Schools"
-            tone="academic"
-            pills={[
-              ...breakdownPills("Internal", schoolsInternal, "School", "Director Internal Cycle Not Submitted", "Director Internal Cycle Submitted"),
-              ...breakdownPills("External", schoolsExternal, "School", "Director External Cycle Not Submitted", "Director External Cycle Submitted"),
-            ]}
-          />
-          <SubmissionStatCard
-            eyebrow="Administrative"
-            title="Administrative Posts"
-            tone="administrative"
-            pills={[...breakdownPills("Internal", adminInternal, "Designation"), ...breakdownPills("External", adminExternal, "Designation")]}
-          />
-        </div>
+      <div style={styles.submissionsOverviewGrid}>
+        <SubmissionStatCard
+          eyebrow="Forward"
+          title="Auditor Forward"
+          tone="forward"
+          pills={[
+            { label: "Pending Forwards to Internal auditor", value: forwardInternalCount, icon: "document" },
+            { label: "Pending Forwards to External auditor", value: forwardExternalCount, icon: "person" },
+          ]}
+        />
+        <SubmissionStatCard
+          eyebrow="Approve"
+          title="IQAC Review Approval"
+          tone="approve"
+          pills={[
+            { label: "Pending Approvals for Internal's review", value: approveInternalCount, icon: "shield" },
+            { label: "Pending Approvals for External's review", value: approveExternalCount, icon: "shield" },
+          ]}
+        />
       </div>
 
-      <div className="app-surface-card" style={styles.submissionsOverviewCard}>
-        <h2 style={styles.submissionsOverviewTitle}>Auditor&apos;s Submissions</h2>
-        <div style={styles.submissionsOverviewGrid}>
-          <SubmissionStatCard
-            eyebrow="Auditors"
-            title="Internal auditor"
-            tone="auditor"
-            pills={simplePills("Internal auditor", internalAuditor, "School/Post")}
-          />
-          <SubmissionStatCard
-            eyebrow="Auditors"
-            title="External auditor"
-            tone="auditor"
-            pills={simplePills("External auditor", externalAuditor, "School/Post")}
-          />
-        </div>
+      <h2 style={styles.iqacSectionHeading}>
+        Academic &amp; administrative submissions
+        <span style={styles.iqacSectionHeadingAccent} />
+      </h2>
+      <div style={styles.submissionsOverviewGrid}>
+        <SubmissionStatCard
+          eyebrow="Academic"
+          title="Schools"
+          tone="academic"
+          pills={[
+            ...breakdownPills("Internal", schoolsInternal, "School", "Director Internal Cycle Not Submitted", "Director Internal Cycle Submitted"),
+            ...breakdownPills("External", schoolsExternal, "School", "Director External Cycle Not Submitted", "Director External Cycle Submitted"),
+          ]}
+        />
+        <SubmissionStatCard
+          eyebrow="Administrative"
+          title="Administrative Posts"
+          tone="administrative"
+          pills={[...breakdownPills("Internal", adminInternal, "Designation"), ...breakdownPills("External", adminExternal, "Designation")]}
+        />
+      </div>
+
+      <h2 style={styles.iqacSectionHeading}>
+        Auditor&apos;s Submissions
+        <span style={styles.iqacSectionHeadingAccent} />
+      </h2>
+      <div style={styles.submissionsOverviewGrid}>
+        <SubmissionStatCard
+          eyebrow="Auditors"
+          title="Internal auditor"
+          tone="auditors"
+          pills={simplePills("Internal auditor", internalAuditor, "School/Post")}
+        />
+        <SubmissionStatCard
+          eyebrow="Auditors"
+          title="External auditor"
+          tone="auditors"
+          pills={simplePills("External auditor", externalAuditor, "School/Post")}
+        />
       </div>
 
       {activeModal && (
@@ -5276,6 +5388,134 @@ function ForwardAuditorModal({ submission, auditors, loading, selectedType, onTy
   );
 }
 
+function initialsFromName(name = "") {
+  return name.split(" ").filter(Boolean).map((word) => word[0]).join("").slice(0, 2).toUpperCase();
+}
+
+function UserProfileModal({ profile, onClose, onSaved }) {
+  const [name, setName] = useState(profile.name || "");
+  const [email, setEmail] = useState(profile.email || "");
+  const [avatarUrl, setAvatarUrl] = useState(profile.avatarUrl || "");
+  const [avatarPreview, setAvatarPreview] = useState(profile.avatarUrl || "");
+  const [avatarFile, setAvatarFile] = useState(null);
+  const [loadingProfile, setLoadingProfile] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    let isActive = true;
+    fetchCurrentUser()
+      .then(({ data }) => {
+        if (!isActive) return;
+        const remote = data?.data || data || {};
+        if (remote.name) setName(remote.name);
+        if (remote.email) setEmail(remote.email);
+        if (remote.avatarUrl) {
+          setAvatarUrl(remote.avatarUrl);
+          setAvatarPreview(remote.avatarUrl);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (isActive) setLoadingProfile(false);
+      });
+    return () => {
+      isActive = false;
+    };
+  }, []);
+
+  const handlePhotoChange = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setAvatarFile(file);
+    setAvatarPreview(URL.createObjectURL(file));
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError("");
+    try {
+      let nextAvatarUrl = avatarUrl;
+      if (avatarFile) {
+        nextAvatarUrl = (await uploadCurrentUserAvatar(avatarFile)) || avatarUrl;
+      }
+      await updateCurrentUser({ name, email });
+      onSaved({ name, email, avatarUrl: nextAvatarUrl });
+      onClose();
+    } catch (err) {
+      setError(getApiErrorMessage(err, "Couldn't save your profile. Please try again."));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={styles.modalBackdrop} onClick={onClose}>
+      <div style={styles.profileModal} onClick={(event) => event.stopPropagation()}>
+        <div style={styles.modalTitle}>My Profile</div>
+
+        <div style={styles.profileModalAvatarRow}>
+          <div style={styles.profileModalAvatar}>
+            {avatarPreview ? (
+              <img src={avatarPreview} alt="" style={styles.profileModalAvatarImg} />
+            ) : (
+              <span>{initialsFromName(name) || "?"}</span>
+            )}
+          </div>
+          <div>
+            <button type="button" style={styles.documentationUploadButton} onClick={() => fileInputRef.current?.click()}>
+              Change photo
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              style={styles.hiddenFileInput}
+              onChange={handlePhotoChange}
+            />
+          </div>
+        </div>
+
+        <div style={styles.profileModalFields}>
+          <label style={styles.readOnlyField}>
+            <span style={styles.readOnlyLabel}>Name</span>
+            <input style={styles.editableInput} value={name} onChange={(event) => setName(event.target.value)} />
+          </label>
+          <label style={styles.readOnlyField}>
+            <span style={styles.readOnlyLabel}>Email</span>
+            <input
+              style={styles.editableInput}
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+            />
+          </label>
+          <div style={styles.readOnlyField}>
+            <span style={styles.readOnlyLabel}>Role</span>
+            <div style={styles.readOnlyValue}>{profile.designation || profile.role}</div>
+          </div>
+          {profile.school && (
+            <div style={styles.readOnlyField}>
+              <span style={styles.readOnlyLabel}>School</span>
+              <div style={styles.readOnlyValue}>{profile.school}</div>
+            </div>
+          )}
+        </div>
+
+        {error && <p style={styles.profileModalError}>{error}</p>}
+
+        <div style={styles.modalActions}>
+          <button type="button" onClick={onClose} style={styles.cancelButton} disabled={saving}>Cancel</button>
+          <button type="button" onClick={handleSave} style={styles.saveButton} disabled={saving || loadingProfile}>
+            {saving ? "Saving..." : "Save changes"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function LogoutModal({ onCancel, onConfirm }) {
   return (
     <div style={styles.modalBackdrop} onClick={onCancel}>
@@ -5434,19 +5674,73 @@ const styles = {
   overviewHeroPill: { padding: "6px 9px", border: "1px solid rgba(255,255,255,.16)", borderRadius: 999, color: "#e0f2fe", background: "rgba(255,255,255,.08)", fontSize: 10, fontWeight: 700 },
   approvalRing: { position: "relative", zIndex: 1, width: 118, height: 118, flex: "0 0 118px", display: "grid", placeItems: "center", borderRadius: "50%", boxShadow: "0 12px 30px rgba(15,23,42,.24)" },
   approvalRingInner: { width: 88, height: 88, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", borderRadius: "50%", color: "#fff", background: "#17233b" },
-  submissionsOverviewCard: {
-    border: "1px solid #e2e8f0",
-    borderRadius: 18,
-    background: "#fff",
-    padding: "26px 28px",
-    boxShadow: "0 14px 34px rgba(15, 23, 42, .05)",
+  iqacOverviewHeader: {
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 16,
+    flexWrap: "wrap",
   },
-  submissionsOverviewTitle: {
-    margin: "0 0 20px",
+  iqacOverviewTitle: {
+    margin: "0 0 6px",
     color: "#0f172a",
-    fontSize: 19,
+    fontSize: 26,
+    fontWeight: 800,
+    letterSpacing: "-.02em",
+  },
+  iqacOverviewSubtitle: {
+    margin: 0,
+    color: "#64748b",
+    fontSize: 13,
+  },
+  iqacDateCard: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    padding: "10px 16px",
+    background: "#fff",
+    border: "1px solid #e2e8f0",
+    borderRadius: 12,
+    boxShadow: "0 6px 18px rgba(15, 23, 42, .05)",
+  },
+  iqacDateIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 9,
+    display: "grid",
+    placeItems: "center",
+    flexShrink: 0,
+    background: "#eef2ff",
+    color: "#4338ca",
+  },
+  iqacDateStrong: {
+    display: "block",
+    color: "#0f172a",
+    fontSize: 13.5,
     fontWeight: 750,
-    letterSpacing: "-.01em",
+  },
+  iqacDateWeekday: {
+    display: "block",
+    color: "#94a3b8",
+    fontSize: 11,
+  },
+  iqacSectionHeading: {
+    position: "relative",
+    margin: 0,
+    paddingBottom: 10,
+    color: "#0f172a",
+    fontSize: 16,
+    fontWeight: 750,
+    borderBottom: "2px solid #e2e8f0",
+  },
+  iqacSectionHeadingAccent: {
+    position: "absolute",
+    left: 0,
+    bottom: -2,
+    width: 56,
+    height: 2,
+    borderRadius: 2,
+    background: "#2563eb",
   },
   submissionsOverviewGrid: {
     display: "grid",
@@ -5455,17 +5749,13 @@ const styles = {
   },
   submissionStatCard: {
     borderRadius: 16,
-    padding: "16px 18px",
-    background: "#DBEAFE",
-    border: "1.5px solid #2055DE",
-    boxShadow: "0 10px 24px rgba(15, 23, 42, .06)",
+    padding: "20px 22px",
+    background: "#fff",
+    border: "1px solid #e2e8f0",
+    boxShadow: "0 10px 24px rgba(15, 23, 42, .05)",
   },
-  "submissionStatCard--academic": {},
-  "submissionStatCard--administrative": {},
-  "submissionStatCard--auditor": {},
   submissionStatEyebrow: {
     display: "block",
-    color: "#2055DE",
     fontSize: 10,
     fontWeight: 800,
     letterSpacing: ".1em",
@@ -5475,53 +5765,64 @@ const styles = {
   submissionStatTitle: {
     display: "block",
     color: "#0f172a",
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: 750,
-    marginBottom: 14,
+    marginBottom: 16,
   },
   submissionStatPills: {
     display: "grid",
     gridTemplateColumns: "repeat(2, 1fr)",
-    gap: 8,
+    gap: 10,
+  },
+  statTileIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    display: "grid",
+    placeItems: "center",
+    flexShrink: 0,
+  },
+  statTileText: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 2,
+    textAlign: "left",
   },
   submissionStatPill: {
     display: "flex",
-    flexDirection: "column",
     alignItems: "center",
-    gap: 2,
-    padding: "8px 6px",
-    borderRadius: 10,
-    background: "#2055DE",
-    color: "#fff",
-    textAlign: "center",
+    gap: 10,
+    padding: "10px 12px",
+    borderRadius: 12,
+    background: "#f8fafc",
+    border: "1px solid #eef2f7",
+    textAlign: "left",
   },
   submissionStatValue: {
-    color: "#fff",
-    fontSize: 16,
+    color: "#0f172a",
+    fontSize: 18,
     fontWeight: 800,
-    lineHeight: 1,
+    lineHeight: 1.15,
   },
   submissionStatLabel: {
-    fontSize: 9,
-    fontWeight: 650,
-    letterSpacing: ".02em",
-    color: "#fff",
-    lineHeight: 1.3,
+    fontSize: 10.5,
+    fontWeight: 600,
+    letterSpacing: ".01em",
+    color: "#64748b",
+    lineHeight: 1.35,
   },
   submissionStatPillButton: {
     display: "flex",
-    flexDirection: "column",
     alignItems: "center",
-    gap: 2,
-    padding: "8px 6px",
-    borderRadius: 10,
-    border: "none",
-    background: "#2055DE",
-    color: "#fff",
-    textAlign: "center",
+    gap: 10,
+    padding: "10px 12px",
+    borderRadius: 12,
+    border: "1px solid #eef2f7",
+    background: "#f8fafc",
+    textAlign: "left",
     cursor: "pointer",
     fontFamily: "inherit",
-    transition: "background .15s ease, transform .15s ease",
+    transition: "border-color .15s ease, background .15s ease, transform .15s ease",
   },
   submissionListModal: {
     width: "min(980px, 96vw)",
@@ -7242,5 +7543,58 @@ const styles = {
     padding: 10,
     fontWeight: 900,
     cursor: "pointer",
+  },
+  saveButton: {
+    flex: 1,
+    border: "none",
+    borderRadius: 8,
+    background: "#2563eb",
+    color: "#fff",
+    padding: 10,
+    fontWeight: 900,
+    cursor: "pointer",
+  },
+  profileModal: {
+    width: "min(420px, 92vw)",
+    background: "#fff",
+    borderRadius: 12,
+    padding: "26px 28px",
+    boxShadow: "0 20px 60px rgba(0,0,0,0.25)",
+  },
+  profileModalAvatarRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 16,
+    marginBottom: 20,
+  },
+  profileModalAvatar: {
+    width: 64,
+    height: 64,
+    flex: "0 0 64px",
+    display: "grid",
+    placeItems: "center",
+    overflow: "hidden",
+    borderRadius: "50%",
+    color: "#1e3a8a",
+    background: "linear-gradient(145deg, #dbeafe, #93c5fd)",
+    fontSize: 20,
+    fontWeight: 800,
+  },
+  profileModalAvatarImg: {
+    width: "100%",
+    height: "100%",
+    objectFit: "cover",
+  },
+  profileModalFields: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 14,
+    marginBottom: 18,
+  },
+  profileModalError: {
+    margin: "12px 0 0",
+    color: "#dc2626",
+    fontSize: 12.5,
+    lineHeight: 1.5,
   },
 };
