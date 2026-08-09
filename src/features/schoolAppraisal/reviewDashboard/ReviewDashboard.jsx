@@ -2642,6 +2642,27 @@ function appendUnclassifiedAccounts(notSubmittedRows, classifiedKeys, accountsBy
   });
 }
 
+// IQAC starting the external cycle (SubmissionCard's "Start External Cycle" action) marks
+// the source APPROVED INTERNAL submission with hasNextCycle so the button doesn't show twice —
+// it doesn't guarantee the backend has (yet) handed back a classified "external" submission row
+// for that school/post. Without this, a school sits in neither bucket right after IQAC starts
+// its external cycle, even though it's clearly awaiting the director's external submission.
+function appendStartedButUnfiledExternalCycles(notSubmittedRows, coveredKeys, submissions, keyFor, resolveContact) {
+  submissions.forEach((submission) => {
+    if (normalizeUserRole(submission.reportCategory) !== "internal" || !submission.hasNextCycle) return;
+    const key = keyFor(submission);
+    if (!key || coveredKeys.has(key)) return;
+    coveredKeys.add(key);
+    const contact = resolveContact(submission) || {};
+    notSubmittedRows.push({
+      name: contact.name || "-",
+      email: contact.email || "-",
+      secondary: contact.secondary || "-",
+      date: null,
+    });
+  });
+}
+
 // Internal/External auditor coverage is driven by actual auditor ACCOUNTS and their
 // assigned schools/posts — not by whatever a submission's forwardedAuditorType/reportCategory
 // happens to say (those can be pre-classified before any real auditor has been created or
@@ -2938,6 +2959,32 @@ function AcademicAdministrativeSubmissionsPanel({ academicSubmissions = [], admi
     classifiedAdministrativePostCodes(administrativeSubmissions),
     adminUsersByPost,
     (code) => ADMINISTRATIVE_POSTS.find((post) => post.value === code)?.label || code
+  );
+
+  const externalCoveredSchoolCodes = new Set(
+    academicSubmissions
+      .filter((submission) => resolvedAuditorTypeFor(submission) === "external")
+      .map((submission) => canonicalSchoolCode(submission.school) || String(submission.school || "").trim().toUpperCase())
+  );
+  appendStartedButUnfiledExternalCycles(
+    schoolsExternal.notSubmittedRows,
+    externalCoveredSchoolCodes,
+    academicSubmissions,
+    (submission) => canonicalSchoolCode(submission.school) || String(submission.school || "").trim().toUpperCase(),
+    resolveSchoolContact
+  );
+
+  const externalCoveredPostCodes = new Set(
+    administrativeSubmissions
+      .filter((submission) => resolvedAuditorTypeFor(submission) === "external")
+      .map((submission) => canonicalAdministrativePost(submission.post || submission.department || submission.school))
+  );
+  appendStartedButUnfiledExternalCycles(
+    adminExternal.notSubmittedRows,
+    externalCoveredPostCodes,
+    administrativeSubmissions,
+    (submission) => canonicalAdministrativePost(submission.post || submission.department || submission.school),
+    resolveAdminContact
   );
 
   const internalAuditor = auditorAccountCoverage(users, "internal", academicSubmissions, administrativeSubmissions);
