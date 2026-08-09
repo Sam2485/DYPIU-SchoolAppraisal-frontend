@@ -24,3 +24,5 @@ export const uploadCurrentUserAvatar = async (file) => {
   return uploaded.avatarUrl || uploaded.url || "";
 };
 
+export const changeCurrentUserPassword = (payload) => apiClient.put("/api/users/me/password", payload);
+

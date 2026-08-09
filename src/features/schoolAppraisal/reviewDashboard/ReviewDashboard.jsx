@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { getApiErrorMessage } from "../../../api/client";
@@ -21,12 +21,13 @@ import {
   deleteAttachment,
   withApproverSignOff,
 } from "../../../api/submissions";
-import { fetchCurrentUser, fetchUsers, updateCurrentUser, uploadCurrentUserAvatar } from "../../../api/users";
+import { fetchUsers } from "../../../api/users";
 import universityLogo from "../../../assets/images/image.png";
 import AppSidebar from "../components/AppSidebar";
 import AuditReportPanel from "../components/AuditReportPanel";
 import { InlineSpinner, LoadingState, SkeletonList } from "../components/LoadingState";
 import { columnsWithSerial } from "../components/tableHelpers";
+import UserProfileModal from "../components/UserProfileModal";
 import { administrativeAuditMeta, administrativeAuditModules } from "../administrativeAudit/administrativeAuditConfig";
 import AdministrativeReportPanel from "../administrativeAudit/AdministrativeReportPanel";
 import AdministrativePartE from "../administrativeAudit/AdministrativePartE";
@@ -1352,6 +1353,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
   const [profileOverrides, setProfileOverrides] = useState({});
   const [auditors, setAuditors] = useState([]);
   const [loadingAuditors, setLoadingAuditors] = useState(false);
+  const [directoryUsers, setDirectoryUsers] = useState([]);
   const [forwardTarget, setForwardTarget] = useState(null);
   const [forwardAuditorType, setForwardAuditorType] = useState("");
   const [forwardingId, setForwardingId] = useState("");
@@ -1423,6 +1425,38 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
 
   const allSubmissions = useMemo(() => [...submissions.academic, ...submissions.administrative], [submissions]);
   const metrics = useMemo(() => buildMetrics(allSubmissions), [allSubmissions]);
+
+  useEffect(() => {
+    let isActive = true;
+    fetchUsers()
+      .then(({ data }) => {
+        if (isActive) setDirectoryUsers(userList(data).map(normalizeAuditor));
+      })
+      .catch(() => {
+        if (isActive) setDirectoryUsers([]);
+      });
+    return () => {
+      isActive = false;
+    };
+  }, []);
+
+  const directorsBySchoolForAvatars = useMemo(
+    () => mapUsersBySchool(usersForCategory(directoryUsers, "academic")),
+    [directoryUsers]
+  );
+  const adminUsersByPostForAvatars = useMemo(
+    () => mapUsersByPost(usersForCategory(directoryUsers, "administrative")),
+    [directoryUsers]
+  );
+  const resolveSubmitterAvatar = (submission) => {
+    if (!submission) return "";
+    if (submission.auditType === "administrative") {
+      const postCode = canonicalAdministrativePost(submission.post || submission.department || submission.school);
+      return adminUsersByPostForAvatars[postCode]?.avatarUrl || "";
+    }
+    const code = canonicalSchoolCode(submission.school) || String(submission.school || "").trim().toUpperCase();
+    return directorsBySchoolForAvatars[code]?.avatarUrl || "";
+  };
   const navigationItems = useMemo(() => {
     if (isAuditor) {
       const auditItems = REVIEW_NAV_ITEMS.filter((item) => {
@@ -2340,6 +2374,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
               auditorCorrectionMode={isAuditor && currentAuditorCorrectionRequested(selectedSubmission, profile)}
               showPreviousAuditorReference={isAuditor && profile.auditorType === "external"}
               currentProfile={profile}
+              submitterAvatarUrl={resolveSubmitterAvatar(selectedSubmission)}
             />
           ) : visibleActiveView === "overview" && isIqacDashboard ? (
             <AcademicAdministrativeSubmissionsPanel
@@ -2367,6 +2402,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
               onOpen={openSubmission}
               onDownload={handleDownloadAttachments}
               downloadingAttachmentsId={downloadingAttachmentsId}
+              resolveSubmitterAvatar={resolveSubmitterAvatar}
             />
           ) : visibleActiveView === "previous-reports" ? (
             <PreviousReportsPanel
@@ -2379,6 +2415,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
               startingNextCycleId={startingNextCycleId}
               onDownload={handleDownloadAttachments}
               downloadingAttachmentsId={downloadingAttachmentsId}
+              resolveSubmitterAvatar={resolveSubmitterAvatar}
             />
           ) : visibleActiveView === "backup-restore" ? (
             <BackupRestorePanel />
@@ -2398,6 +2435,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
               onDownload={!isAuditor ? handleDownloadAttachments : null}
               downloadingAttachmentsId={downloadingAttachmentsId}
               loading={loadingSubmissions}
+              resolveSubmitterAvatar={resolveSubmitterAvatar}
             />
           )}
 
@@ -2412,6 +2450,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
               onDownload={!isAuditor ? handleDownloadAttachments : null}
               downloadingAttachmentsId={downloadingAttachmentsId}
               loading={loadingSubmissions}
+              resolveSubmitterAvatar={resolveSubmitterAvatar}
             />
           )}
         </main>
@@ -3293,7 +3332,7 @@ function SchoolProgressPanel({ schools, loading }) {
   );
 }
 
-function AuditReviewPanel({ auditType, submissions, activeGroup, onGroupChange, onOpen, onForward, onDownload, downloadingAttachmentsId, loading }) {
+function AuditReviewPanel({ auditType, submissions, activeGroup, onGroupChange, onOpen, onForward, onDownload, downloadingAttachmentsId, loading, resolveSubmitterAvatar }) {
   const filtered = activeGroup === "all" ? submissions : submissions.filter((submission) => submission.group === activeGroup);
   const counts = {
     all: submissions.length,
@@ -3342,6 +3381,7 @@ function AuditReviewPanel({ auditType, submissions, activeGroup, onGroupChange, 
             onForward={onForward ? () => onForward(submission) : null}
             onDownload={onDownload ? () => onDownload(submission) : null}
             downloadingAttachments={downloadingAttachmentsId === submission.id}
+            submitterAvatarUrl={resolveSubmitterAvatar?.(submission)}
           />
         ))}
       </div>
@@ -3349,7 +3389,7 @@ function AuditReviewPanel({ auditType, submissions, activeGroup, onGroupChange, 
   );
 }
 
-function AuditorFinalReviewPanel({ submissions, loading, onOpen, onDownload, downloadingAttachmentsId }) {
+function AuditorFinalReviewPanel({ submissions, loading, onOpen, onDownload, downloadingAttachmentsId, resolveSubmitterAvatar }) {
   return (
     <section style={styles.panel}>
       <div style={styles.pageTitleRow}>
@@ -3371,6 +3411,7 @@ function AuditorFinalReviewPanel({ submissions, loading, onOpen, onDownload, dow
             onOpen={() => onOpen(submission)}
             onDownload={() => onDownload(submission)}
             downloadingAttachments={downloadingAttachmentsId === submission.id}
+            submitterAvatarUrl={resolveSubmitterAvatar?.(submission)}
           />
         ))}
       </div>
@@ -3387,6 +3428,7 @@ function PreviousReportsPanel({
   startingNextCycleId,
   onDownload,
   downloadingAttachmentsId,
+  resolveSubmitterAvatar,
 }) {
   const [activeAuditType, setActiveAuditType] = useState("all");
   const [reportSubmission, setReportSubmission] = useState(null);
@@ -3486,6 +3528,7 @@ function PreviousReportsPanel({
             downloadingAttachmentsId={downloadingAttachmentsId}
             onGenerateReport={setReportSubmission}
             reportOnly={showingHistoricalYear}
+            resolveSubmitterAvatar={resolveSubmitterAvatar}
           />
         </div>
       )}
@@ -3503,6 +3546,7 @@ function PreviousReportAuditSection({
   downloadingAttachmentsId,
   onGenerateReport,
   reportOnly = false,
+  resolveSubmitterAvatar,
 }) {
   const [activeCategory, setActiveCategory] = useState("internal");
   const categoryTabs = [
@@ -3556,6 +3600,7 @@ function PreviousReportAuditSection({
               onDownload={() => onDownload(submission)}
               downloadingAttachments={downloadingAttachmentsId === submission.id}
               onGenerateReport={reportOnly ? () => onGenerateReport(submission) : null}
+              submitterAvatarUrl={resolveSubmitterAvatar?.(submission)}
             />
           );
         })}
@@ -3573,12 +3618,18 @@ function SubmissionCard({
   onDownload,
   downloadingAttachments,
   onGenerateReport,
+  submitterAvatarUrl,
 }) {
   const forwardedAuditorCount = submission.forwardedToAuditorNames?.length || submission.forwardedToAuditorIds?.length || 0;
+  const submitterInitials = submission.submittedBy && submission.submittedBy !== "-"
+    ? initialsFor(submission.submittedBy)
+    : initialsFor(submission.school);
   return (
     <article className="app-surface-card review-submission-card" style={styles.submissionCard}>
       <div style={styles.submissionTop}>
-        <div style={styles.schoolAvatar}>{initialsFor(submission.school)}</div>
+        <div style={styles.schoolAvatar}>
+          {submitterAvatarUrl ? <img src={submitterAvatarUrl} alt="" style={styles.schoolAvatarImg} /> : submitterInitials}
+        </div>
         <div style={styles.submissionTitleBlock}>
           <h3 style={styles.schoolName}>{submission.school}</h3>
           {(submission.auditType === "academic" || (submission.submittedBy && submission.submittedBy !== "-")) && (
@@ -3742,6 +3793,7 @@ function FullFormReview({
   auditorCorrectionMode,
   showPreviousAuditorReference,
   currentProfile,
+  submitterAvatarUrl,
 }) {
   const sections = sectionsForAudit(submission.auditType);
   const previousInternalReport = (submission.versionHistory || [])
@@ -3937,13 +3989,22 @@ function FullFormReview({
           Back
         </button>
         <div style={styles.fullReviewTitleBlock}>
-          <p style={styles.kicker}>{auditLabels[submission.auditType]}</p>
-          <h2 style={styles.fullReviewTitle}>{submission.school}</h2>
-          <p style={styles.modalMeta}>
-            {submission.auditType === "academic" ? "Director" : "Submitted by"}: {submission.submittedBy}
-            {submission.submittedByDesignation ? ` · ${submission.submittedByDesignation}` : ""}
-            {" · "}Submitted {formatDate(submission.submittedOn)}
-          </p>
+          <div style={styles.fullReviewTitleRow}>
+            {submitterAvatarUrl && (
+              <span style={styles.fullReviewAvatar}>
+                <img src={submitterAvatarUrl} alt="" style={styles.fullReviewAvatarImg} />
+              </span>
+            )}
+            <div style={{ minWidth: 0 }}>
+              <p style={styles.kicker}>{auditLabels[submission.auditType]}</p>
+              <h2 style={styles.fullReviewTitle}>{submission.school}</h2>
+              <p style={styles.modalMeta}>
+                {submission.auditType === "academic" ? "Director" : "Submitted by"}: {submission.submittedBy}
+                {submission.submittedByDesignation ? ` · ${submission.submittedByDesignation}` : ""}
+                {" · "}Submitted {formatDate(submission.submittedOn)}
+              </p>
+            </div>
+          </div>
         </div>
         <StatusBadge status={submission.status} />
       </div>
@@ -5388,134 +5449,6 @@ function ForwardAuditorModal({ submission, auditors, loading, selectedType, onTy
   );
 }
 
-function initialsFromName(name = "") {
-  return name.split(" ").filter(Boolean).map((word) => word[0]).join("").slice(0, 2).toUpperCase();
-}
-
-function UserProfileModal({ profile, onClose, onSaved }) {
-  const [name, setName] = useState(profile.name || "");
-  const [email, setEmail] = useState(profile.email || "");
-  const [avatarUrl, setAvatarUrl] = useState(profile.avatarUrl || "");
-  const [avatarPreview, setAvatarPreview] = useState(profile.avatarUrl || "");
-  const [avatarFile, setAvatarFile] = useState(null);
-  const [loadingProfile, setLoadingProfile] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-  const fileInputRef = useRef(null);
-
-  useEffect(() => {
-    let isActive = true;
-    fetchCurrentUser()
-      .then(({ data }) => {
-        if (!isActive) return;
-        const remote = data?.data || data || {};
-        if (remote.name) setName(remote.name);
-        if (remote.email) setEmail(remote.email);
-        if (remote.avatarUrl) {
-          setAvatarUrl(remote.avatarUrl);
-          setAvatarPreview(remote.avatarUrl);
-        }
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (isActive) setLoadingProfile(false);
-      });
-    return () => {
-      isActive = false;
-    };
-  }, []);
-
-  const handlePhotoChange = (event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    setAvatarFile(file);
-    setAvatarPreview(URL.createObjectURL(file));
-  };
-
-  const handleSave = async () => {
-    setSaving(true);
-    setError("");
-    try {
-      let nextAvatarUrl = avatarUrl;
-      if (avatarFile) {
-        nextAvatarUrl = (await uploadCurrentUserAvatar(avatarFile)) || avatarUrl;
-      }
-      await updateCurrentUser({ name, email });
-      onSaved({ name, email, avatarUrl: nextAvatarUrl });
-      onClose();
-    } catch (err) {
-      setError(getApiErrorMessage(err, "Couldn't save your profile. Please try again."));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div style={styles.modalBackdrop} onClick={onClose}>
-      <div style={styles.profileModal} onClick={(event) => event.stopPropagation()}>
-        <div style={styles.modalTitle}>My Profile</div>
-
-        <div style={styles.profileModalAvatarRow}>
-          <div style={styles.profileModalAvatar}>
-            {avatarPreview ? (
-              <img src={avatarPreview} alt="" style={styles.profileModalAvatarImg} />
-            ) : (
-              <span>{initialsFromName(name) || "?"}</span>
-            )}
-          </div>
-          <div>
-            <button type="button" style={styles.documentationUploadButton} onClick={() => fileInputRef.current?.click()}>
-              Change photo
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              style={styles.hiddenFileInput}
-              onChange={handlePhotoChange}
-            />
-          </div>
-        </div>
-
-        <div style={styles.profileModalFields}>
-          <label style={styles.readOnlyField}>
-            <span style={styles.readOnlyLabel}>Name</span>
-            <input style={styles.editableInput} value={name} onChange={(event) => setName(event.target.value)} />
-          </label>
-          <label style={styles.readOnlyField}>
-            <span style={styles.readOnlyLabel}>Email</span>
-            <input
-              style={styles.editableInput}
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-            />
-          </label>
-          <div style={styles.readOnlyField}>
-            <span style={styles.readOnlyLabel}>Role</span>
-            <div style={styles.readOnlyValue}>{profile.designation || profile.role}</div>
-          </div>
-          {profile.school && (
-            <div style={styles.readOnlyField}>
-              <span style={styles.readOnlyLabel}>School</span>
-              <div style={styles.readOnlyValue}>{profile.school}</div>
-            </div>
-          )}
-        </div>
-
-        {error && <p style={styles.profileModalError}>{error}</p>}
-
-        <div style={styles.modalActions}>
-          <button type="button" onClick={onClose} style={styles.cancelButton} disabled={saving}>Cancel</button>
-          <button type="button" onClick={handleSave} style={styles.saveButton} disabled={saving || loadingProfile}>
-            {saving ? "Saving..." : "Save changes"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function LogoutModal({ onCancel, onConfirm }) {
   return (
     <div style={styles.modalBackdrop} onClick={onCancel}>
@@ -6209,10 +6142,16 @@ const styles = {
     borderRadius: 12,
     display: "grid",
     placeItems: "center",
+    overflow: "hidden",
     color: "#fff",
     background: "linear-gradient(135deg, #2563eb, #0ea5e9)",
     fontSize: 12,
     fontWeight: 900,
+  },
+  schoolAvatarImg: {
+    width: "100%",
+    height: "100%",
+    objectFit: "cover",
   },
   submissionTitleBlock: {
     flex: 1,
@@ -6562,6 +6501,27 @@ const styles = {
   },
   fullReviewTitleBlock: {
     minWidth: 0,
+  },
+  fullReviewTitleRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    minWidth: 0,
+  },
+  fullReviewAvatar: {
+    width: 40,
+    height: 40,
+    flexShrink: 0,
+    borderRadius: "50%",
+    overflow: "hidden",
+    display: "grid",
+    placeItems: "center",
+    background: "#eef2ff",
+  },
+  fullReviewAvatarImg: {
+    width: "100%",
+    height: "100%",
+    objectFit: "cover",
   },
   fullReviewTitle: {
     margin: "0 0 5px",
@@ -7543,58 +7503,5 @@ const styles = {
     padding: 10,
     fontWeight: 900,
     cursor: "pointer",
-  },
-  saveButton: {
-    flex: 1,
-    border: "none",
-    borderRadius: 8,
-    background: "#2563eb",
-    color: "#fff",
-    padding: 10,
-    fontWeight: 900,
-    cursor: "pointer",
-  },
-  profileModal: {
-    width: "min(420px, 92vw)",
-    background: "#fff",
-    borderRadius: 12,
-    padding: "26px 28px",
-    boxShadow: "0 20px 60px rgba(0,0,0,0.25)",
-  },
-  profileModalAvatarRow: {
-    display: "flex",
-    alignItems: "center",
-    gap: 16,
-    marginBottom: 20,
-  },
-  profileModalAvatar: {
-    width: 64,
-    height: 64,
-    flex: "0 0 64px",
-    display: "grid",
-    placeItems: "center",
-    overflow: "hidden",
-    borderRadius: "50%",
-    color: "#1e3a8a",
-    background: "linear-gradient(145deg, #dbeafe, #93c5fd)",
-    fontSize: 20,
-    fontWeight: 800,
-  },
-  profileModalAvatarImg: {
-    width: "100%",
-    height: "100%",
-    objectFit: "cover",
-  },
-  profileModalFields: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 14,
-    marginBottom: 18,
-  },
-  profileModalError: {
-    margin: "12px 0 0",
-    color: "#dc2626",
-    fontSize: 12.5,
-    lineHeight: 1.5,
   },
 };

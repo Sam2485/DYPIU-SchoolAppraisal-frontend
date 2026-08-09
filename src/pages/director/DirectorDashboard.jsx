@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import AuditForm from "../../features/schoolAppraisal/components/AuditForm";
 import AppSidebar from "../../features/schoolAppraisal/components/AppSidebar";
+import UserProfileModal from "../../features/schoolAppraisal/components/UserProfileModal";
 import { academicAudit2025Schema } from "../../features/schoolAppraisal/formSchemas";
 import { scrollPageToTop } from "../../utils/scrollToTop";
 import { fetchCurrentAuditCycle } from "../../api/submissions";
@@ -23,6 +24,8 @@ export default function DirectorDashboard() {
   const [activeAcademicYear, setActiveAcademicYear] = useState("");
   const [availableYears, setAvailableYears] = useState(["2025-26", "2026-27"]);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [profileOverrides, setProfileOverrides] = useState({});
   const [activeSectionId, setActiveSectionId] = useState(directorAuditSchema.sections[0].id);
   const [reportMode, setReportMode] = useState(false);
 
@@ -57,10 +60,12 @@ export default function DirectorDashboard() {
   const isHistoricalYear = Boolean(activeAcademicYear && compactYear(academicYear) !== compactYear(activeAcademicYear));
 
   const profile = {
+    id: sessionStorage.getItem("userId") || "",
     name: sessionStorage.getItem("name") || "Director of Schools",
     designation: sessionStorage.getItem("designation") || "Director",
     school: sessionStorage.getItem("school") || "School",
     email: sessionStorage.getItem("email") || sessionStorage.getItem("username") || "",
+    ...profileOverrides,
   };
 
   const handleLogout = () => {
@@ -93,6 +98,7 @@ export default function DirectorDashboard() {
         }}
         profile={profile}
         onLogout={() => setShowLogoutModal(true)}
+        onOpenProfile={() => setShowProfileModal(true)}
       />
 
       <main className="academic-audit-main" style={styles.page}>
@@ -109,6 +115,17 @@ export default function DirectorDashboard() {
       </main>
 
       {showLogoutModal && <LogoutModal onCancel={() => setShowLogoutModal(false)} onConfirm={handleLogout} />}
+      {showProfileModal && (
+        <UserProfileModal
+          profile={profile}
+          onClose={() => setShowProfileModal(false)}
+          onSaved={(updates) => {
+            if (updates.name) sessionStorage.setItem("name", updates.name);
+            if (updates.email) sessionStorage.setItem("email", updates.email);
+            setProfileOverrides((prev) => ({ ...prev, ...updates }));
+          }}
+        />
+      )}
     </div>
     </>
   );

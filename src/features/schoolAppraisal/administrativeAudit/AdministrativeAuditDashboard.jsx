@@ -12,6 +12,7 @@ import { columnsWithSerial, serialColumnFor } from "../components/tableHelpers";
 import AdministrativeReportPanel from "./AdministrativeReportPanel";
 import AdministrativePartE from "./AdministrativePartE";
 import AppSidebar from "../components/AppSidebar";
+import UserProfileModal from "../components/UserProfileModal";
 import { administrativeAuditMeta, administrativeAuditModules } from "./administrativeAuditConfig";
 import { getAttachmentUrl } from "../../../utils/attachment";
 import { scrollPageToTop } from "../../../utils/scrollToTop";
@@ -175,6 +176,7 @@ const buildInitialData = () => {
 };
 
 const getUserProfile = () => ({
+  id: sessionStorage.getItem("userId") || "",
   name: sessionStorage.getItem("name") || "Administrative User",
   designation: sessionStorage.getItem("designation") || "Registrar",
   post: sessionStorage.getItem("post") || "",
@@ -255,13 +257,15 @@ export default function AdministrativeAuditDashboard() {
 
   const isHistoricalYear = Boolean(activeAcademicYear && compactAcademicYear(academicYear) !== compactAcademicYear(activeAcademicYear));
 
-  const profile = getUserProfile();
+  const [profileOverrides, setProfileOverrides] = useState({});
+  const profile = { ...getUserProfile(), ...profileOverrides };
   const userPost = normalizePost(profile.post || profile.designation);
   const firstOwnedModule = administrativeUserModules.find((module) => moduleOwnerPost(module) === userPost);
   const [activeModuleId, setActiveModuleId] = useState(firstOwnedModule?.id || administrativeUserModules[0].id);
   const [reportMode, setReportMode] = useState(false);
   const [printReportAfterRender, setPrintReportAfterRender] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
   const [submitStatus, setSubmitStatus] = useState("");
   const [status, setStatus] = useState("");
   const [loadingDraft, setLoadingDraft] = useState(true);
@@ -653,6 +657,7 @@ export default function AdministrativeAuditDashboard() {
             profile={profile}
             academicYear={academicYear}
             onLogout={() => setShowLogoutModal(true)}
+            onOpenProfile={() => setShowProfileModal(true)}
           />
           <main className="admin-audit-main" style={styles.main}>
             <AdministrativeReportPanel
@@ -663,6 +668,17 @@ export default function AdministrativeAuditDashboard() {
             />
           </main>
           {showLogoutModal && <LogoutModal onCancel={() => setShowLogoutModal(false)} onConfirm={handleLogout} />}
+          {showProfileModal && (
+            <UserProfileModal
+              profile={profile}
+              onClose={() => setShowProfileModal(false)}
+              onSaved={(updates) => {
+                if (updates.name) sessionStorage.setItem("name", updates.name);
+                if (updates.email) sessionStorage.setItem("email", updates.email);
+                setProfileOverrides((prev) => ({ ...prev, ...updates }));
+              }}
+            />
+          )}
         </div>
       </>
     );
@@ -684,6 +700,7 @@ export default function AdministrativeAuditDashboard() {
             setAcademicYear(newYear);
           }}
           onLogout={() => setShowLogoutModal(true)}
+          onOpenProfile={() => setShowProfileModal(true)}
         />
 
         <main className="admin-audit-main" style={styles.main}>
@@ -876,6 +893,17 @@ export default function AdministrativeAuditDashboard() {
         </main>
 
         {showLogoutModal && <LogoutModal onCancel={() => setShowLogoutModal(false)} onConfirm={handleLogout} />}
+        {showProfileModal && (
+          <UserProfileModal
+            profile={profile}
+            onClose={() => setShowProfileModal(false)}
+            onSaved={(updates) => {
+              if (updates.name) sessionStorage.setItem("name", updates.name);
+              if (updates.email) sessionStorage.setItem("email", updates.email);
+              setProfileOverrides((prev) => ({ ...prev, ...updates }));
+            }}
+          />
+        )}
       </div>
     </>
   );
@@ -1027,7 +1055,7 @@ function AttachmentField({
   );
 }
 
-function Sidebar({ activeModuleId, setActiveModuleId, profile, academicYear, currentAcademicYear, availableYears, onYearChange, onLogout }) {
+function Sidebar({ activeModuleId, setActiveModuleId, profile, academicYear, currentAcademicYear, availableYears, onYearChange, onLogout, onOpenProfile }) {
   return (
     <AppSidebar
       title="Administrative Audit"
@@ -1044,6 +1072,7 @@ function Sidebar({ activeModuleId, setActiveModuleId, profile, academicYear, cur
       onChange={setActiveModuleId}
       profile={profile}
       onLogout={onLogout}
+      onOpenProfile={onOpenProfile}
     />
   );
 }
