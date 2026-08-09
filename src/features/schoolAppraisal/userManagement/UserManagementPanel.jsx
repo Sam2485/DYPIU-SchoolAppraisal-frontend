@@ -249,6 +249,7 @@ export default function UserManagementPanel() {
   const [updatingId, setUpdatingId] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [accountFilter, setAccountFilter] = useState("all");
+  const [avatarPreviewUser, setAvatarPreviewUser] = useState(null);
 
   const schools = useMemo(() => SCHOOL_OPTIONS, []);
   const filteredUsers = useMemo(() =>
@@ -738,13 +739,7 @@ export default function UserManagementPanel() {
                 <tr key={user.id}>
                   <td style={styles.td}>
                     <div style={styles.nameCell}>
-                      <span style={styles.tableAvatar}>
-                        {user.avatarUrl ? (
-                          <img src={user.avatarUrl} alt="" style={styles.tableAvatarImg} />
-                        ) : (
-                          user.name?.charAt(0)?.toUpperCase() || "U"
-                        )}
-                      </span>
+                      <UserAvatarButton user={user} onClick={() => setAvatarPreviewUser(user)} />
                       <strong>{user.name}</strong>
                     </div>
                   </td>
@@ -977,8 +972,55 @@ export default function UserManagementPanel() {
         </div>
       ), document.body)}
 
+      <AvatarPreviewCard key={avatarPreviewUser?.id || "none"} user={avatarPreviewUser} onClose={() => setAvatarPreviewUser(null)} />
+
       <PrintableUsersReport users={filteredUsers} stats={userStats} />
     </section>
+  );
+}
+
+function UserAvatarButton({ user, onClick }) {
+  const [imgError, setImgError] = useState(false);
+  const showImage = Boolean(user.avatarUrl) && !imgError;
+
+  return (
+    <button
+      type="button"
+      style={{ ...styles.tableAvatarBase, ...(showImage ? styles.tableAvatarPhoto : styles.tableAvatarInitials) }}
+      onClick={onClick}
+      aria-label={`View ${user.name}'s profile picture`}
+    >
+      {showImage ? (
+        <img src={user.avatarUrl} alt="" style={styles.tableAvatarImg} onError={() => setImgError(true)} />
+      ) : (
+        user.name?.charAt(0)?.toUpperCase() || "U"
+      )}
+    </button>
+  );
+}
+
+function AvatarPreviewCard({ user, onClose }) {
+  const [imgError, setImgError] = useState(false);
+
+  if (!user || typeof document === "undefined") return null;
+
+  const showImage = Boolean(user.avatarUrl) && !imgError;
+
+  return createPortal(
+    <div style={styles.avatarPreviewOverlay} onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="avatar-preview-name">
+      <div style={styles.avatarPreviewCard} onClick={(event) => event.stopPropagation()}>
+        {showImage ? (
+          <img src={user.avatarUrl} alt="" style={styles.avatarPreviewImg} onError={() => setImgError(true)} />
+        ) : (
+          <div style={styles.avatarPreviewFallback}>{user.name?.charAt(0)?.toUpperCase() || "U"}</div>
+        )}
+        <h3 id="avatar-preview-name" style={styles.avatarPreviewName}>{user.name}</h3>
+        <p style={styles.avatarPreviewMeta}>{user.role} · {user.assignment || user.email}</p>
+        {!showImage && <p style={styles.avatarPreviewNoPhoto}>No profile picture uploaded yet.</p>}
+        <button type="button" style={styles.avatarPreviewClose} onClick={onClose}>Close</button>
+      </div>
+    </div>,
+    document.body
   );
 }
 
@@ -1264,9 +1306,19 @@ const styles = {
   table: { width: "100%", borderCollapse: "collapse", tableLayout: "fixed" },
   th: { padding: "10px 11px", borderRight: "1px solid #3a465b", color: "#f8fafc", background: "#1e293b", fontSize: 11.5, fontWeight: 700, textAlign: "left" },
   td: { padding: "11px", borderRight: "1px solid #dfe5ec", borderBottom: "1px solid #dfe5ec", color: "#334155", fontSize: 12, overflowWrap: "anywhere" },
-  nameCell: { display: "flex", alignItems: "center", gap: 9 },
-  tableAvatar: { width: 26, height: 26, flex: "0 0 26px", display: "grid", placeItems: "center", overflow: "hidden", borderRadius: "50%", color: "#fff", background: "linear-gradient(135deg, #2563eb, #0ea5e9)", fontSize: 10.5, fontWeight: 800 },
+  nameCell: { display: "flex", alignItems: "center", gap: 11 },
+  tableAvatarBase: { width: 40, height: 40, flex: "0 0 40px", display: "grid", placeItems: "center", overflow: "hidden", borderRadius: "50%", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit", fontSize: 14, fontWeight: 800 },
+  tableAvatarInitials: { color: "#fff", background: "linear-gradient(135deg, #2563eb, #0ea5e9)" },
+  tableAvatarPhoto: { background: "#f1f5f9" },
   tableAvatarImg: { width: "100%", height: "100%", objectFit: "cover" },
+  avatarPreviewOverlay: { position: "fixed", inset: 0, zIndex: 90, display: "grid", placeItems: "center", padding: 20, background: "rgba(15, 23, 42, .6)", backdropFilter: "blur(4px)" },
+  avatarPreviewCard: { width: "min(360px, 92vw)", display: "flex", flexDirection: "column", alignItems: "center", gap: 14, padding: "28px 24px", borderRadius: 20, background: "#fff", boxShadow: "0 28px 80px rgba(15,23,42,.3)" },
+  avatarPreviewImg: { width: 220, height: 220, borderRadius: "50%", objectFit: "cover", boxShadow: "0 0 0 4px #eff6ff" },
+  avatarPreviewFallback: { width: 220, height: 220, display: "grid", placeItems: "center", borderRadius: "50%", color: "#fff", background: "linear-gradient(135deg, #2563eb, #0ea5e9)", fontSize: 64, fontWeight: 800, boxShadow: "0 0 0 4px #eff6ff" },
+  avatarPreviewName: { margin: 0, color: "#0f172a", fontSize: 16, fontWeight: 800, textAlign: "center" },
+  avatarPreviewMeta: { margin: 0, color: "#64748b", fontSize: 12.5, textAlign: "center" },
+  avatarPreviewNoPhoto: { margin: 0, color: "#94a3b8", fontSize: 11.5, textAlign: "center", fontStyle: "italic" },
+  avatarPreviewClose: { marginTop: 6, border: "none", borderRadius: 8, background: "#f1f5f9", color: "#475569", padding: "10px 22px", fontWeight: 800, cursor: "pointer", fontFamily: "inherit" },
   centerCell: { textAlign: "center", verticalAlign: "middle" },
   actionCell: { width: 96, textAlign: "center" },
   emptyCell: { padding: 28, color: "#64748b", fontSize: 12, textAlign: "center" },

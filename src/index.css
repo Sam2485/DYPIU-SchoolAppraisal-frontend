@@ -128,16 +128,16 @@ body {
 .app-sidebar__support > span:last-child { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .app-sidebar__support small { color: #7183a0; font-size: 9.5px; }
 .app-sidebar__support strong { overflow: hidden; color: #bfdbfe; font-size: 10.5px; font-weight: 550; text-overflow: ellipsis; }
-.app-sidebar__profile { display: flex; align-items: center; gap: 9px; padding: 9px 4px 0; border-top: 1px solid rgba(148, 163, 184, .12); cursor: pointer; border-radius: 8px; transition: background .15s ease; }
+.app-sidebar__profile { display: flex; align-items: center; gap: 12px; padding: 14px 8px; border-top: 1px solid rgba(148, 163, 184, .12); cursor: pointer; border-radius: 10px; transition: background .15s ease; }
 .app-sidebar__profile:hover { background: rgba(148, 163, 184, .08); }
 .app-sidebar__profile:focus-visible { outline: 2px solid rgba(147, 197, 253, .5); outline-offset: 2px; }
-.app-sidebar__avatar { width: 32px; height: 32px; flex: 0 0 32px; display: grid; place-items: center; overflow: hidden; border-radius: 10px; color: #1e3a8a; background: linear-gradient(145deg, #dbeafe, #93c5fd); font-size: 10.5px; font-weight: 800; }
+.app-sidebar__avatar { width: 48px; height: 48px; flex: 0 0 48px; display: grid; place-items: center; overflow: hidden; border-radius: 12px; color: #1e3a8a; background: linear-gradient(145deg, #dbeafe, #93c5fd); font-size: 14px; font-weight: 800; }
 .app-sidebar__avatar-img { width: 100%; height: 100%; object-fit: cover; }
-.app-sidebar__profile-copy { min-width: 0; display: flex; flex: 1; flex-direction: column; gap: 2px; }
+.app-sidebar__profile-copy { min-width: 0; display: flex; flex: 1; flex-direction: column; gap: 3px; }
 .app-sidebar__profile-copy strong, .app-sidebar__profile-copy span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.app-sidebar__profile-copy strong { color: #e5edf9; font-size: 11.5px; font-weight: 650; }
-.app-sidebar__profile-copy span { color: #6f819e; font-size: 9.5px; }
-.app-sidebar__logout { width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 8px; color: #7f8da5; background: transparent; cursor: pointer; transition: color .18s, background .18s; }
+.app-sidebar__profile-copy strong { color: #e5edf9; font-size: 13px; font-weight: 650; }
+.app-sidebar__profile-copy span { color: #6f819e; font-size: 10.5px; }
+.app-sidebar__logout { width: 34px; height: 34px; flex-shrink: 0; display: grid; place-items: center; border: 0; border-radius: 8px; color: #7f8da5; background: transparent; cursor: pointer; transition: color .18s, background .18s; }
 .app-sidebar__logout:hover { color: #fca5a5; background: rgba(239, 68, 68, .1); }
 
 @media (max-width: 900px) {
