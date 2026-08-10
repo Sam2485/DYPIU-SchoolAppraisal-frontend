@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { getApiErrorMessage } from "../../../api/client";
 import {
@@ -23,6 +22,7 @@ import {
 } from "../../../api/submissions";
 import { fetchCurrentUser, fetchUsers } from "../../../api/users";
 import universityLogo from "../../../assets/images/image.png";
+import iqacLogo from "../../../assets/images/IQAS.png";
 import AppSidebar from "../components/AppSidebar";
 import AuditReportPanel from "../components/AuditReportPanel";
 import { InlineSpinner, LoadingState, SkeletonList } from "../components/LoadingState";
@@ -2356,6 +2356,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
                   <p style={styles.meta}>School Appraisal Review - Academic Year {academicYearPeriod(academicYear)}</p>
                 </div>
               </div>
+              <img src={iqacLogo} alt="IQAC Logo" style={styles.headerIqacLogo} />
             </header>
           )}
 
@@ -2724,8 +2725,13 @@ function appendStartedButUnfiledExternalCycles(notSubmittedRows, coveredKeys, su
 // assigned). A school/post only counts once a matching auditor account exists and lists it
 // among their assignments; an auditor with multiple assignments is one row per status bucket
 // (their completed schools/posts joined together, and separately their pending ones).
-function auditorAccountCoverage(users = [], auditorType, academicSubmissions = [], administrativeSubmissions = []) {
-  const auditors = users.filter((user) => user.accountType === "auditor" && user.auditorType === auditorType);
+function auditorAccountCoverage(users = [], auditorType, academicSubmissions = [], administrativeSubmissions = [], categoryFilter = null) {
+  const auditors = users.filter(
+    (user) =>
+      user.accountType === "auditor" &&
+      user.auditorType === auditorType &&
+      (!categoryFilter || user.category === categoryFilter)
+  );
 
   const academicCompletion = new Map();
   const academicDates = new Map();
@@ -2773,11 +2779,18 @@ function auditorAccountCoverage(users = [], auditorType, academicSubmissions = [
     const dateMap = isAcademic ? academicDates : adminDates;
     const labelFor = isAcademic ? (key) => key : postLabel;
 
-    // Only count a school/post once IQAC has actually forwarded it to this auditor type
-    // (i.e. it has an entry in the completion map at all) — being assigned to an auditor
-    // isn't enough on its own to appear as "not submitted".
+    // Internal is the track every school/post starts on, so an internal auditor's assigned
+    // key shows as "not submitted" even before anything's been forwarded to them — the
+    // account should never be invisible just because nothing has reached them yet. External
+    // only exists once IQAC has actually started it for that key (i.e. it has an entry in
+    // the completion map) — a school/post can't be "pending external" before its internal
+    // cycle is done and IQAC begins the external track, so unstarted keys are omitted rather
+    // than shown as not-submitted.
     const completedKeys = keys.filter((key) => completionMap.get(key) === true);
-    const pendingKeys = keys.filter((key) => completionMap.has(key) && completionMap.get(key) !== true);
+    const pendingKeys = keys.filter((key) => {
+      if (completionMap.get(key) === true) return false;
+      return auditorType === "internal" || completionMap.has(key);
+    });
 
     if (completedKeys.length) {
       const dates = completedKeys.map((key) => dateMap.get(key)).filter(Boolean).sort();
@@ -2917,6 +2930,15 @@ function administrativePostCoverageWithRows(administrativeSubmissions = [], audi
   return { submittedRows, notSubmittedRows };
 }
 
+// Flattens a { submittedRows, notSubmittedRows } coverage object into a single list, tagging
+// each row with its status so a table can render one status column instead of two buckets.
+function combinedStatusRows(coverage) {
+  return [
+    ...coverage.submittedRows.map((row) => ({ ...row, status: "submitted" })),
+    ...coverage.notSubmittedRows.map((row) => ({ ...row, status: "not_submitted" })),
+  ];
+}
+
 const CARD_TONE_EYEBROW_COLOR = {
   forward: "#2563eb",
   approve: "#16a34a",
@@ -3008,72 +3030,112 @@ function SubmissionStatCard({ eyebrow, title, tone = "forward", pills }) {
   );
 }
 
-function SubmissionListModal({ title, secondaryLabel, showDate, submitted, total, rows, onClose }) {
-  // Lock background scroll while open so the page can't be left scrolled to a
-  // position where the (viewport-centered) modal appears to be "below the fold".
-  useEffect(() => {
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = previousOverflow;
-    };
-  }, []);
+function SubmissionStatusBadge({ status }) {
+  const submitted = status === "submitted";
+  return (
+    <span
+      style={{
+        ...styles.submissionStatusBadge,
+        ...(submitted ? styles.submissionStatusBadgeSubmitted : styles.submissionStatusBadgeNotSubmitted),
+      }}
+    >
+      <StatTileIcon name={submitted ? "checkCircle" : "clock"} />
+      {submitted ? "Submitted" : "Not Submitted"}
+    </span>
+  );
+}
 
-  // Rendered via a portal straight into <body> so this always centers on the real
-  // viewport, regardless of any transform/filter an ancestor further up the tree
-  // (e.g. a card's hover transform) might otherwise pin it against.
-  return createPortal(
-    <div style={styles.modalBackdrop} onClick={onClose}>
-      <div
-        style={styles.submissionListModal}
-        onClick={(event) => event.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="submission-list-title"
-      >
-        <div style={styles.submissionListHeader}>
-          <h3 id="submission-list-title" style={styles.submissionListTitle}>{title}</h3>
-          <span style={styles.submissionListBadge}>{submitted} of {total} submitted</span>
-        </div>
-        <div style={styles.submissionListTableWrap}>
-          <table style={styles.submissionListTable}>
-            <thead>
-              <tr>
-                <th style={styles.submissionListTh}>Name</th>
-                <th style={styles.submissionListTh}>Email</th>
-                <th style={styles.submissionListTh}>{secondaryLabel}</th>
-                {showDate && <th style={styles.submissionListTh}>Submitted on</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {!rows.length && (
-                <tr>
-                  <td style={styles.submissionListTd} colSpan={showDate ? 4 : 3}>No records to show.</td>
-                </tr>
-              )}
-              {rows.map((row, index) => (
-                <tr key={`${row.email}-${index}`}>
-                  <td style={{ ...styles.submissionListTd, ...styles.submissionListTdStrong }}>{row.name || "-"}</td>
-                  <td style={styles.submissionListTd}>{row.email || "-"}</td>
-                  <td style={styles.submissionListTd}>{row.secondary || "-"}</td>
-                  {showDate && <td style={styles.submissionListTd}>{formatDate(row.date)}</td>}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <button type="button" className="btn btn-secondary" style={styles.submissionListClose} onClick={onClose}>
-          Close
-        </button>
+// Renders one scrollable table for the given rows/column config. Shared by both the plain
+// tabs (auditor lists) and the nested cycle sub-tabs (director/post lists) below.
+function SubmissionsTable({ secondaryLabel, statusLabel, rows }) {
+  return (
+    <div style={styles.submissionsTableWrap}>
+      <table style={styles.submissionsTable}>
+        <thead>
+          <tr>
+            <th style={styles.submissionsTableTh}>Name</th>
+            <th style={styles.submissionsTableTh}>Email</th>
+            <th style={styles.submissionsTableTh}>{secondaryLabel}</th>
+            <th style={styles.submissionsTableTh}>{statusLabel}</th>
+            <th style={styles.submissionsTableTh}>Submitted On</th>
+          </tr>
+        </thead>
+        <tbody>
+          {!rows.length && (
+            <tr>
+              <td style={styles.submissionsTableEmpty} colSpan={5}>No records to show.</td>
+            </tr>
+          )}
+          {rows.map((row, index) => (
+            <tr key={`${row.email}-${row.secondary}-${index}`}>
+              <td style={{ ...styles.submissionsTableTd, ...styles.submissionsTableTdStrong }}>{row.name || "-"}</td>
+              <td style={styles.submissionsTableTd}>{row.email || "-"}</td>
+              <td style={styles.submissionsTableTd}>{row.secondary || "-"}</td>
+              <td style={styles.submissionsTableTd}><SubmissionStatusBadge status={row.status} /></td>
+              <td style={styles.submissionsTableTd}>{row.status === "submitted" ? formatDate(row.date) : "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// A card with a row of top-level tabs. A tab either carries its own `rows` directly (the
+// auditor tabs), or a `subTabs` list (the Director/Posts tab's Internal Cycle / External
+// Cycle split) — each track is rendered from its own untouched coverage list rather than
+// merging internal+external together, so a school/post/auditor never appears twice just
+// because it has activity on both tracks, and one track's cast doesn't hide the other's.
+function SubmissionsTableCard({ tabs }) {
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [activeSubIndex, setActiveSubIndex] = useState(0);
+  const activeTab = tabs[Math.min(activeIndex, tabs.length - 1)];
+  const hasSubTabs = Array.isArray(activeTab.subTabs);
+  const activeSubTab = hasSubTabs ? activeTab.subTabs[Math.min(activeSubIndex, activeTab.subTabs.length - 1)] : null;
+  const leaf = hasSubTabs ? activeSubTab : activeTab;
+
+  return (
+    <div className="app-surface-card submissions-table-card" style={styles.submissionsTableCard}>
+      <div style={styles.submissionsTableTabs}>
+        {tabs.map((tab, index) => (
+          <button
+            key={tab.key}
+            type="button"
+            style={{ ...styles.submissionsTableTab, ...(index === activeIndex ? styles.submissionsTableTabActive : {}) }}
+            onClick={(event) => {
+              event.currentTarget.blur();
+              setActiveIndex(index);
+              setActiveSubIndex(0);
+            }}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
-    </div>,
-    document.body
+      {hasSubTabs && (
+        <div style={styles.submissionsTableSubTabs}>
+          {activeTab.subTabs.map((subTab, index) => (
+            <button
+              key={subTab.key}
+              type="button"
+              style={{ ...styles.submissionsTableSubTab, ...(index === activeSubIndex ? styles.submissionsTableSubTabActive : {}) }}
+              onClick={(event) => {
+                event.currentTarget.blur();
+                setActiveSubIndex(index);
+              }}
+            >
+              {subTab.label}
+            </button>
+          ))}
+        </div>
+      )}
+      <SubmissionsTable secondaryLabel={leaf.secondaryLabel} statusLabel={leaf.statusLabel} rows={leaf.rows} />
+    </div>
   );
 }
 
 function AcademicAdministrativeSubmissionsPanel({ academicSubmissions = [], administrativeSubmissions = [] }) {
   const [users, setUsers] = useState([]);
-  const [activeModal, setActiveModal] = useState(null);
 
   useEffect(() => {
     let isActive = true;
@@ -3127,64 +3189,28 @@ function AcademicAdministrativeSubmissionsPanel({ academicSubmissions = [], admi
     resolveSchoolContact
   );
 
-  const internalAuditor = auditorAccountCoverage(users, "internal", academicSubmissions, administrativeSubmissions);
-  const externalAuditor = auditorAccountCoverage(users, "external", academicSubmissions, administrativeSubmissions);
+  const academicInternalAuditor = auditorAccountCoverage(users, "internal", academicSubmissions, administrativeSubmissions, "academic");
+  const academicExternalAuditor = auditorAccountCoverage(users, "external", academicSubmissions, administrativeSubmissions, "academic");
+  const adminInternalAuditor = auditorAccountCoverage(users, "internal", academicSubmissions, administrativeSubmissions, "administrative");
+  const adminExternalAuditor = auditorAccountCoverage(users, "external", academicSubmissions, administrativeSubmissions, "administrative");
+
+  // Each track (internal/external) keeps its own untouched row list — nothing here merges
+  // schoolsInternal with schoolsExternal, so a school/post/auditor can't show up twice just
+  // because it has activity on both tracks.
+  const schoolsInternalRows = combinedStatusRows(schoolsInternal);
+  const schoolsExternalRows = combinedStatusRows(schoolsExternal);
+  const postsInternalRows = combinedStatusRows(adminInternal);
+  const postsExternalRows = combinedStatusRows(adminExternal);
+  const academicInternalAuditorRows = combinedStatusRows(academicInternalAuditor);
+  const academicExternalAuditorRows = combinedStatusRows(academicExternalAuditor);
+  const adminInternalAuditorRows = combinedStatusRows(adminInternalAuditor);
+  const adminExternalAuditorRows = combinedStatusRows(adminExternalAuditor);
 
   const allSubmissionsForApproval = [...academicSubmissions, ...administrativeSubmissions];
   const forwardInternalCount = pendingForwardCount(academicSubmissions, administrativeSubmissions, "internal");
   const forwardExternalCount = pendingForwardCount(academicSubmissions, administrativeSubmissions, "external");
   const approveInternalCount = pendingApproveCount(allSubmissionsForApproval, "internal");
   const approveExternalCount = pendingApproveCount(allSubmissionsForApproval, "external");
-
-  const showList = (title, secondaryLabel, showDate, rows, submittedCount, totalCount) => {
-    setActiveModal({ title, secondaryLabel, showDate, submitted: submittedCount, total: totalCount, rows });
-  };
-
-  const breakdownPills = (
-    label,
-    coverage,
-    secondaryLabel,
-    notSubmittedLabel = `${label} Not Submitted`,
-    submittedLabel = `${label} Submitted`
-  ) => {
-    const total = coverage.submittedRows.length + coverage.notSubmittedRows.length;
-    return [
-      {
-        label: submittedLabel,
-        value: coverage.submittedRows.length,
-        icon: "checkCircle",
-        tone: "green",
-        onClick: () => showList(submittedLabel, secondaryLabel, true, coverage.submittedRows, coverage.submittedRows.length, total),
-      },
-      {
-        label: notSubmittedLabel,
-        value: coverage.notSubmittedRows.length,
-        icon: "clock",
-        tone: "orange",
-        onClick: () => showList(notSubmittedLabel, secondaryLabel, false, coverage.notSubmittedRows, coverage.submittedRows.length, total),
-      },
-    ];
-  };
-
-  const simplePills = (title, coverage, secondaryLabel) => {
-    const total = coverage.submittedRows.length + coverage.notSubmittedRows.length;
-    return [
-      {
-        label: "Submitted",
-        value: coverage.submittedRows.length,
-        icon: "checkCircle",
-        tone: "green",
-        onClick: () => showList(`${title} submitted`, secondaryLabel, true, coverage.submittedRows, coverage.submittedRows.length, total),
-      },
-      {
-        label: "Not submitted",
-        value: coverage.notSubmittedRows.length,
-        icon: "clock",
-        tone: "orange",
-        onClick: () => showList(`${title} not submitted`, secondaryLabel, false, coverage.notSubmittedRows, coverage.submittedRows.length, total),
-      },
-    ];
-  };
 
   const today = new Date();
   const todayLabel = today.toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" });
@@ -3233,57 +3259,90 @@ function AcademicAdministrativeSubmissionsPanel({ academicSubmissions = [], admi
       </div>
 
       <h2 style={styles.iqacSectionHeading}>
-        Academic &amp; administrative submissions
+        Academic Submissions
         <span style={styles.iqacSectionHeadingAccent} />
       </h2>
-      <div style={styles.submissionsOverviewGrid}>
-        <SubmissionStatCard
-          eyebrow="Academic"
-          title="Schools"
-          tone="academic"
-          pills={[
-            ...breakdownPills("Internal", schoolsInternal, "School", "Director Internal Cycle Not Submitted", "Director Internal Cycle Submitted"),
-            ...breakdownPills("External", schoolsExternal, "School", "Director External Cycle Not Submitted", "Director External Cycle Submitted"),
-          ]}
-        />
-        <SubmissionStatCard
-          eyebrow="Administrative"
-          title="Administrative Posts"
-          tone="administrative"
-          pills={[...breakdownPills("Internal", adminInternal, "Designation"), ...breakdownPills("External", adminExternal, "Designation")]}
-        />
-      </div>
+      <SubmissionsTableCard
+        tabs={[
+          {
+            key: "directors",
+            label: "Director",
+            subTabs: [
+              {
+                key: "internal",
+                label: "Internal Cycle",
+                secondaryLabel: "School",
+                statusLabel: "Internal Cycle Submission Status",
+                rows: schoolsInternalRows,
+              },
+              {
+                key: "external",
+                label: "External Cycle",
+                secondaryLabel: "School",
+                statusLabel: "External Cycle Submission Status",
+                rows: schoolsExternalRows,
+              },
+            ],
+          },
+          {
+            key: "internalAuditor",
+            label: "Internal Auditor",
+            secondaryLabel: "Schools Assigned",
+            statusLabel: "Submission Status",
+            rows: academicInternalAuditorRows,
+          },
+          {
+            key: "externalAuditor",
+            label: "External Auditor",
+            secondaryLabel: "Schools Assigned",
+            statusLabel: "Submission Status",
+            rows: academicExternalAuditorRows,
+          },
+        ]}
+      />
 
       <h2 style={styles.iqacSectionHeading}>
-        Auditor&apos;s Submissions
+        Administrative Submissions
         <span style={styles.iqacSectionHeadingAccent} />
       </h2>
-      <div style={styles.submissionsOverviewGrid}>
-        <SubmissionStatCard
-          eyebrow="Auditors"
-          title="Internal auditor"
-          tone="auditors"
-          pills={simplePills("Internal auditor", internalAuditor, "School/Post")}
-        />
-        <SubmissionStatCard
-          eyebrow="Auditors"
-          title="External auditor"
-          tone="auditors"
-          pills={simplePills("External auditor", externalAuditor, "School/Post")}
-        />
-      </div>
-
-      {activeModal && (
-        <SubmissionListModal
-          title={activeModal.title}
-          secondaryLabel={activeModal.secondaryLabel}
-          showDate={activeModal.showDate}
-          submitted={activeModal.submitted}
-          total={activeModal.total}
-          rows={activeModal.rows}
-          onClose={() => setActiveModal(null)}
-        />
-      )}
+      <SubmissionsTableCard
+        tabs={[
+          {
+            key: "posts",
+            label: "Posts",
+            subTabs: [
+              {
+                key: "internal",
+                label: "Internal Cycle",
+                secondaryLabel: "Post",
+                statusLabel: "Internal Cycle Submission Status",
+                rows: postsInternalRows,
+              },
+              {
+                key: "external",
+                label: "External Cycle",
+                secondaryLabel: "Post",
+                statusLabel: "External Cycle Submission Status",
+                rows: postsExternalRows,
+              },
+            ],
+          },
+          {
+            key: "internalAuditor",
+            label: "Internal Auditor",
+            secondaryLabel: "Posts Assigned",
+            statusLabel: "Submission Status",
+            rows: adminInternalAuditorRows,
+          },
+          {
+            key: "externalAuditor",
+            label: "External Auditor",
+            secondaryLabel: "Posts Assigned",
+            statusLabel: "Submission Status",
+            rows: adminExternalAuditorRows,
+          },
+        ]}
+      />
     </section>
   );
 }
@@ -5578,6 +5637,13 @@ const styles = {
     height: 62,
     objectFit: "contain",
   },
+  headerIqacLogo: {
+    height: 84,
+    width: "auto",
+    objectFit: "contain",
+    flexShrink: 0,
+    alignSelf: "center",
+  },
   kicker: {
     margin: "0 0 6px",
     color: "#2563eb",
@@ -5776,73 +5842,111 @@ const styles = {
     fontFamily: "inherit",
     transition: "border-color .15s ease, background .15s ease, transform .15s ease",
   },
-  submissionListModal: {
-    width: "min(980px, 96vw)",
-    maxHeight: "86vh",
-    display: "flex",
-    flexDirection: "column",
-    gap: 16,
-    background: "#182134",
-    border: "1px solid #3e4147",
+  submissionsTableCard: {
     borderRadius: 16,
-    padding: "22px 24px",
-    boxShadow: "0 24px 60px rgba(0,0,0,.45)",
+    padding: "18px 20px 8px",
+    background: "#fff",
+    border: "1px solid #e2e8f0",
+    boxShadow: "0 10px 24px rgba(15, 23, 42, .05)",
   },
-  submissionListHeader: {
+  submissionsTableTabs: {
     display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
+    gap: 22,
+    borderBottom: "1px solid #e2e8f0",
+    marginBottom: 14,
   },
-  submissionListTitle: {
-    margin: 0,
-    color: "#fff",
-    fontSize: 17,
-    fontWeight: 750,
+  submissionsTableTab: {
+    padding: "0 0 12px",
+    background: "transparent",
+    border: "none",
+    outline: "none",
+    borderBottom: "2px solid transparent",
+    color: "#64748b",
+    fontSize: 13.5,
+    fontWeight: 700,
+    cursor: "pointer",
+    fontFamily: "inherit",
+    marginBottom: -1,
   },
-  submissionListBadge: {
-    flexShrink: 0,
-    padding: "6px 12px",
+  submissionsTableTabActive: {
+    color: "#2563eb",
+    borderBottomColor: "#2563eb",
+  },
+  submissionsTableSubTabs: {
+    display: "flex",
+    gap: 8,
+    marginBottom: 14,
+  },
+  submissionsTableSubTab: {
+    padding: "6px 14px",
     borderRadius: 999,
-    background: "rgba(34, 197, 94, .18)",
-    border: "1px solid rgba(74, 222, 128, .35)",
-    color: "#4ade80",
-    fontSize: 11.5,
-    fontWeight: 750,
+    border: "1px solid #e2e8f0",
+    outline: "none",
+    background: "#f8fafc",
+    color: "#64748b",
+    fontSize: 12,
+    fontWeight: 700,
+    cursor: "pointer",
+    fontFamily: "inherit",
   },
-  submissionListTableWrap: {
+  submissionsTableSubTabActive: {
+    color: "#2563eb",
+    background: "#eff6ff",
+    borderColor: "#bfdbfe",
+  },
+  submissionsTableWrap: {
     overflow: "auto",
+    maxHeight: 320,
     borderRadius: 10,
-    border: "1px solid #2c2f36",
+    border: "1px solid #edf1f6",
   },
-  submissionListTable: {
+  submissionsTable: {
     width: "100%",
     borderCollapse: "collapse",
-    fontSize: 13,
+    fontSize: 12.5,
   },
-  submissionListTh: {
+  submissionsTableTh: {
+    position: "sticky",
+    top: 0,
     textAlign: "left",
     padding: "10px 14px",
-    color: "#8b93a1",
-    fontSize: 11,
+    background: "#f8fafc",
+    color: "#64748b",
+    fontSize: 10.5,
     fontWeight: 700,
     textTransform: "uppercase",
     letterSpacing: ".04em",
-    borderBottom: "1px solid #2c2f36",
+    borderBottom: "1px solid #edf1f6",
     whiteSpace: "nowrap",
   },
-  submissionListTd: {
-    padding: "12px 14px",
-    color: "#cbd5e1",
-    borderBottom: "1px solid #23262d",
+  submissionsTableTd: {
+    padding: "11px 14px",
+    color: "#334155",
+    borderBottom: "1px solid #f1f5f9",
     wordBreak: "break-word",
   },
-  submissionListTdStrong: {
-    color: "#fff",
+  submissionsTableTdStrong: {
+    color: "#0f172a",
     fontWeight: 700,
   },
-  submissionListClose: {
-    alignSelf: "flex-end",
+  submissionsTableEmpty: {
+    padding: "22px 14px",
+    textAlign: "center",
+    color: "#94a3b8",
+  },
+  submissionStatusBadge: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    fontSize: 12,
+    fontWeight: 700,
+    whiteSpace: "nowrap",
+  },
+  submissionStatusBadgeSubmitted: {
+    color: "#16a34a",
+  },
+  submissionStatusBadgeNotSubmitted: {
+    color: "#ea580c",
   },
   blueHeading: {
     padding: "0 0 15px",

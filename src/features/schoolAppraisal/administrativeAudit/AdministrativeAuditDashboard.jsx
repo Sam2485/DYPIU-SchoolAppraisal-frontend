@@ -4,6 +4,7 @@ import { getApiErrorMessage } from "../../../api/client";
 import { SIGN_OFF_FIELD, buildSubmissionPayload, deleteAttachment, fetchMyDraft, normalizeDraft, saveDraft, uploadAttachments, fetchAdministrativeStatus, submitAdministrativePart, fetchCurrentAuditCycle } from "../../../api/submissions";
 import { fetchCurrentUser } from "../../../api/users";
 import universityLogo from "../../../assets/images/image.png";
+import iqacLogo from "../../../assets/images/IQAS.png";
 import AuditTable from "../components/AuditTable";
 import DateInput from "../components/DateInput";
 import { InlineSpinner, LoadingState, SkeletonList } from "../components/LoadingState";
@@ -736,10 +737,13 @@ export default function AdministrativeAuditDashboard() {
                 <p style={styles.cycleLabel}>{cycleLabelFor(workflow)}</p>
               </div>
             </div>
-            <div className="admin-audit-actions" style={styles.headerActions}>
-              <button type="button" className="btn btn-secondary" onClick={resetActiveModule} disabled={readOnly || loadingDraft || savingDraft}>
-                Reset Section
-              </button>
+            <div style={styles.headerRight}>
+              <img src={iqacLogo} alt="IQAC Logo" style={styles.headerIqacLogo} />
+              <div className="admin-audit-actions" style={styles.headerActions}>
+                <button type="button" className="btn btn-secondary" onClick={resetActiveModule} disabled={readOnly || loadingDraft || savingDraft}>
+                  Reset Section
+                </button>
+              </div>
             </div>
           </header>
 
@@ -1412,6 +1416,19 @@ const styles = {
     fontWeight: 800,
     textTransform: "uppercase",
     letterSpacing: ".04em",
+  },
+  headerRight: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-end",
+    gap: 10,
+    flexShrink: 0,
+  },
+  headerIqacLogo: {
+    height: 92,
+    width: "auto",
+    objectFit: "contain",
+    flexShrink: 0,
   },
   headerActions: {
     display: "flex",

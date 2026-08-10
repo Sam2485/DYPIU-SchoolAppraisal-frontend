@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { getApiErrorMessage } from "../../../api/client";
 import { buildSubmissionPayload, deleteAttachment, fetchMyDraft, fetchSubmissionSnapshots, normalizeDraft, saveDraft, signOffProfileFromSession, submitDraft, uploadAttachments, withSubmitterSignOff } from "../../../api/submissions";
 import universityLogo from "../../../assets/images/image.png";
+import iqacLogo from "../../../assets/images/IQAS.png";
 import AuditReportPanel from "./AuditReportPanel";
 import AuditSection from "./AuditSection";
 import { InlineSpinner, LoadingState, SkeletonList } from "./LoadingState";
@@ -532,14 +533,17 @@ export default function AuditForm({
             </div>
           </div>
         </div>
-        <div style={styles.actions}>
-          <button type="button" className="btn btn-secondary" onClick={handleClear} disabled={readOnly}>
-            Clear
-          </button>
-          <button type="button" className="btn btn-primary" onClick={handleSaveDraft} disabled={readOnly || savingDraft || loadingDraft} aria-busy={savingDraft}>
-            {savingDraft && <InlineSpinner label="Saving draft" />}
-            {savingDraft ? "Saving..." : "Save Draft"}
-          </button>
+        <div style={styles.headerRight}>
+          <img src={iqacLogo} alt="IQAC Logo" style={styles.headerIqacLogo} />
+          <div style={styles.actions}>
+            <button type="button" className="btn btn-secondary" onClick={handleClear} disabled={readOnly}>
+              Clear
+            </button>
+            <button type="button" className="btn btn-primary" onClick={handleSaveDraft} disabled={readOnly || savingDraft || loadingDraft} aria-busy={savingDraft}>
+              {savingDraft && <InlineSpinner label="Saving draft" />}
+              {savingDraft ? "Saving..." : "Save Draft"}
+            </button>
+          </div>
         </div>
         <div className="audit-form__progress" style={styles.progressTrack}>
           <span style={{ ...styles.progressBar, width: `${progress}%` }} />
@@ -703,6 +707,19 @@ const styles = {
   readOnlyPill: { padding: "4px 8px", borderRadius: 999, color: "#475569", background: "#e2e8f0", fontSize: 9.5, fontWeight: 700, letterSpacing: ".03em", textTransform: "uppercase" },
   progressTrack: { position: "absolute", left: 0, right: 0, bottom: 0, height: 4, background: "#eff6ff" },
   progressBar: { display: "block", height: "100%", borderRadius: "0 4px 4px 0", background: "linear-gradient(90deg, #2563eb, #38bdf8)", transition: "width .3s ease" },
+  headerRight: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-end",
+    gap: 10,
+    flexShrink: 0,
+  },
+  headerIqacLogo: {
+    height: 92,
+    width: "auto",
+    objectFit: "contain",
+    flexShrink: 0,
+  },
   actions: {
     display: "flex",
     gap: 10,
