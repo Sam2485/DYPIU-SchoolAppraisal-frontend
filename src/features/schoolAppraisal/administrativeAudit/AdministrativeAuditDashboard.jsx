@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getApiErrorMessage } from "../../../api/client";
 import { SIGN_OFF_FIELD, buildSubmissionPayload, deleteAttachment, fetchMyDraft, normalizeDraft, saveDraft, uploadAttachments, fetchAdministrativeStatus, submitAdministrativePart, fetchCurrentAuditCycle } from "../../../api/submissions";
+import { fetchCurrentUser } from "../../../api/users";
 import universityLogo from "../../../assets/images/image.png";
 import AuditTable from "../components/AuditTable";
 import DateInput from "../components/DateInput";
@@ -258,7 +259,26 @@ export default function AdministrativeAuditDashboard() {
   const isHistoricalYear = Boolean(activeAcademicYear && compactAcademicYear(academicYear) !== compactAcademicYear(activeAcademicYear));
 
   const [profileOverrides, setProfileOverrides] = useState({});
-  const profile = { ...getUserProfile(), ...profileOverrides };
+  const [accountAvatarUrl, setAccountAvatarUrl] = useState("");
+
+  // sessionStorage never carries the avatar, and profileOverrides only lives for the rest of
+  // this session after a save in UserProfileModal — without this fetch, the sidebar avatar
+  // reverts to initials on every reload/re-login even though the picture was saved.
+  useEffect(() => {
+    let isActive = true;
+    fetchCurrentUser()
+      .then(({ data }) => {
+        if (!isActive) return;
+        const remote = data?.data || data || {};
+        if (remote.avatarUrl) setAccountAvatarUrl(remote.avatarUrl);
+      })
+      .catch(() => {});
+    return () => {
+      isActive = false;
+    };
+  }, []);
+
+  const profile = { ...getUserProfile(), avatarUrl: accountAvatarUrl, ...profileOverrides };
   const userPost = normalizePost(profile.post || profile.designation);
   const firstOwnedModule = administrativeUserModules.find((module) => moduleOwnerPost(module) === userPost);
   const [activeModuleId, setActiveModuleId] = useState(firstOwnedModule?.id || administrativeUserModules[0].id);

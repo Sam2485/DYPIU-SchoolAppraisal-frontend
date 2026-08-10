@@ -21,7 +21,7 @@ import {
   deleteAttachment,
   withApproverSignOff,
 } from "../../../api/submissions";
-import { fetchUsers } from "../../../api/users";
+import { fetchCurrentUser, fetchUsers } from "../../../api/users";
 import universityLogo from "../../../assets/images/image.png";
 import AppSidebar from "../components/AppSidebar";
 import AuditReportPanel from "../components/AuditReportPanel";
@@ -1400,6 +1400,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
   const [startingAcademicYear, setStartingAcademicYear] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [auditorProfile, setAuditorProfile] = useState(null);
+  const [accountProfile, setAccountProfile] = useState(null);
   const canManageUsers = role === "iqac";
   const roleConfig = isAuditor ? REVIEW_ROLE_CONFIG.auditor : REVIEW_ROLE_CONFIG[role] || REVIEW_ROLE_CONFIG.iqac;
   const sessionProfile = useMemo(() => ({
@@ -1418,10 +1419,11 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
   const profile = useMemo(() => ({
     ...sessionProfile,
     ...(auditorProfile || {}),
+    ...(accountProfile || {}),
     role,
     auditorRole: auditorProfile?.auditorRole || sessionProfile.auditorRole,
     ...profileOverrides,
-  }), [auditorProfile, role, sessionProfile, profileOverrides]);
+  }), [auditorProfile, accountProfile, role, sessionProfile, profileOverrides]);
 
   const allSubmissions = useMemo(() => [...submissions.academic, ...submissions.administrative], [submissions]);
   const metrics = useMemo(() => buildMetrics(allSubmissions), [allSubmissions]);
@@ -1570,6 +1572,23 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
       isActive = false;
     };
   }, [isAuditor, role, sessionProfile.auditorRole, sessionProfile.email, sessionProfile.id]);
+
+  // sessionStorage never carries the avatar, and profileOverrides is only populated for the
+  // rest of this session after a save in UserProfileModal — so without this, the sidebar
+  // avatar reverts to initials on every reload/re-login even though the picture was saved.
+  useEffect(() => {
+    let isActive = true;
+    fetchCurrentUser()
+      .then(({ data }) => {
+        if (!isActive) return;
+        const remote = data?.data || data || {};
+        if (remote.avatarUrl) setAccountProfile((prev) => ({ ...prev, avatarUrl: remote.avatarUrl }));
+      })
+      .catch(() => {});
+    return () => {
+      isActive = false;
+    };
+  }, []);
 
   useEffect(() => {
     let isActive = true;
@@ -2666,24 +2685,6 @@ function classifiedAcademicSchoolCodes(academicSubmissions = []) {
   );
 }
 
-function classifiedAdministrativePostCodes(administrativeSubmissions = []) {
-  const codes = new Set();
-  administrativeSubmissions.forEach((submission) => {
-    const assignments = submission.auditorAssignments || [];
-    if (assignments.length) {
-      assignments.forEach((assignment) => {
-        if (assignment.post && ["internal", "external"].includes(assignment.auditorType)) codes.add(assignment.post);
-      });
-      return;
-    }
-    if (["internal", "external"].includes(resolvedAuditorTypeFor(submission))) {
-      const postCode = canonicalAdministrativePost(submission.post || submission.department || submission.school);
-      if (postCode) codes.add(postCode);
-    }
-  });
-  return codes;
-}
-
 function appendUnclassifiedAccounts(notSubmittedRows, classifiedKeys, accountsByKey, secondaryFor) {
   Object.entries(accountsByKey).forEach(([key, account]) => {
     if (classifiedKeys.has(key)) return;
@@ -2819,11 +2820,11 @@ function pendingForwardCount(academicSubmissions = [], administrativeSubmissions
   administrativeSubmissions.forEach((submission) => {
     const track = resolvedAuditorTypeFor(submission);
     if (track !== auditorType && !(!track && auditorType === "internal")) return;
+    // Administrative posts share a single office-wide form, so a pending forward counts as
+    // one item (not one per contributing post) once any submitted post lacks an auditor.
     const assignedPosts = new Set((submission.auditorAssignments || []).map((assignment) => assignment.post));
-    administrativeSubmittedPostsFor(submission).forEach((post) => {
-      const postCode = canonicalAdministrativePost(post) || post;
-      if (!assignedPosts.has(postCode)) count += 1;
-    });
+    const submittedPosts = administrativeSubmittedPostsFor(submission).map((post) => canonicalAdministrativePost(post) || post);
+    if (submittedPosts.some((postCode) => !assignedPosts.has(postCode))) count += 1;
   });
 
   return count;
@@ -2866,6 +2867,51 @@ function auditorTypeCoverageWithRows(submissions = [], auditorType, resolveConta
       date: isDraft ? null : submission.submittedOn,
     };
     (isDraft ? notSubmittedRows : submittedRows).push(row);
+  });
+
+  return { submittedRows, notSubmittedRows };
+}
+
+// The "Administrative Posts" overview card tracks the 4 administrative posts
+// (Registrar/HR/Dean Student Welfare/Dean Placement), not submission records — all 4 posts
+// share a single administrative form per audit track, and each post contributes its own
+// section into it. So unlike auditorTypeCoverageWithRows (one row per submission), this
+// counts one row per post: "Not Submitted" starts at all 4 posts and moves a post into
+// "Submitted" only once administrativeSubmittedPostsFor reports that post's section as
+// submitted on the track's submission. The external track only becomes visible (0 of 4,
+// counting up as posts submit) once IQAC has actually started it — either a submission
+// already resolved to "external" exists, or an approved internal submission has been marked
+// hasNextCycle; internal is always visible since it's the track every post starts on.
+function administrativePostCoverageWithRows(administrativeSubmissions = [], auditorType, adminUsersByPost = {}) {
+  const relevant = administrativeSubmissions.filter((submission) => resolvedAuditorTypeFor(submission) === auditorType);
+  const cycleStarted =
+    auditorType === "internal" ||
+    relevant.length > 0 ||
+    administrativeSubmissions.some(
+      (submission) => normalizeUserRole(submission.reportCategory) === "internal" && submission.hasNextCycle
+    );
+
+  const submittedRows = [];
+  const notSubmittedRows = [];
+  if (!cycleStarted) return { submittedRows, notSubmittedRows };
+
+  const submittedPostDates = new Map();
+  relevant.forEach((submission) => {
+    administrativeSubmittedPostsFor(submission).forEach((post) => {
+      const postCode = canonicalAdministrativePost(post) || post;
+      if (postCode && !submittedPostDates.has(postCode)) submittedPostDates.set(postCode, submission.submittedOn || null);
+    });
+  });
+
+  Object.keys(adminUsersByPost).forEach((postCode) => {
+    const adminUser = adminUsersByPost[postCode];
+    const row = {
+      name: adminUser?.name || "-",
+      email: adminUser?.email || "-",
+      secondary: ADMINISTRATIVE_POSTS.find((post) => post.value === postCode)?.label || postCode,
+      date: submittedPostDates.get(postCode) || null,
+    };
+    (submittedPostDates.has(postCode) ? submittedRows : notSubmittedRows).push(row);
   });
 
   return { submittedRows, notSubmittedRows };
@@ -3051,35 +3097,21 @@ function AcademicAdministrativeSubmissionsPanel({ academicSubmissions = [], admi
     const director = directorsBySchool[code];
     return { name: director?.name, email: director?.email, secondary: submission.school || director?.school || code };
   };
-  const resolveAdminContact = (submission) => {
-    const postCode = canonicalAdministrativePost(submission.post || submission.department || submission.school);
-    const adminUser = adminUsersByPost[postCode];
-    return {
-      name: adminUser?.name,
-      email: adminUser?.email,
-      secondary: submission.submittedByDesignation || ADMINISTRATIVE_POSTS.find((post) => post.value === postCode)?.label || postCode,
-    };
-  };
-
   const schoolsInternal = auditorTypeCoverageWithRows(academicSubmissions, "internal", resolveSchoolContact);
   const schoolsExternal = auditorTypeCoverageWithRows(academicSubmissions, "external", resolveSchoolContact);
-  const adminInternal = auditorTypeCoverageWithRows(administrativeSubmissions, "internal", resolveAdminContact);
-  const adminExternal = auditorTypeCoverageWithRows(administrativeSubmissions, "external", resolveAdminContact);
+  const adminInternal = administrativePostCoverageWithRows(administrativeSubmissions, "internal", adminUsersByPost);
+  const adminExternal = administrativePostCoverageWithRows(administrativeSubmissions, "external", adminUsersByPost);
 
-  // Director/admin-post accounts that don't have a submission classified into an auditor
-  // cycle yet (brand-new accounts, or a submitted-but-not-yet-forwarded form) default into
-  // the "Internal ... Not Submitted" bucket instead of being invisible on the dashboard.
+  // Director accounts that don't have a submission classified into an auditor cycle yet
+  // (brand-new accounts, or a submitted-but-not-yet-forwarded form) default into the
+  // "Internal ... Not Submitted" bucket instead of being invisible on the dashboard.
+  // (Administrative posts don't need this fallback: administrativePostCoverageWithRows
+  // already puts every post without a submitted section into "Not Submitted" directly.)
   appendUnclassifiedAccounts(
     schoolsInternal.notSubmittedRows,
     classifiedAcademicSchoolCodes(academicSubmissions),
     directorsBySchool,
     (code, director) => director.school || code
-  );
-  appendUnclassifiedAccounts(
-    adminInternal.notSubmittedRows,
-    classifiedAdministrativePostCodes(administrativeSubmissions),
-    adminUsersByPost,
-    (code) => ADMINISTRATIVE_POSTS.find((post) => post.value === code)?.label || code
   );
 
   const externalCoveredSchoolCodes = new Set(
@@ -3093,19 +3125,6 @@ function AcademicAdministrativeSubmissionsPanel({ academicSubmissions = [], admi
     academicSubmissions,
     (submission) => canonicalSchoolCode(submission.school) || String(submission.school || "").trim().toUpperCase(),
     resolveSchoolContact
-  );
-
-  const externalCoveredPostCodes = new Set(
-    administrativeSubmissions
-      .filter((submission) => resolvedAuditorTypeFor(submission) === "external")
-      .map((submission) => canonicalAdministrativePost(submission.post || submission.department || submission.school))
-  );
-  appendStartedButUnfiledExternalCycles(
-    adminExternal.notSubmittedRows,
-    externalCoveredPostCodes,
-    administrativeSubmissions,
-    (submission) => canonicalAdministrativePost(submission.post || submission.department || submission.school),
-    resolveAdminContact
   );
 
   const internalAuditor = auditorAccountCoverage(users, "internal", academicSubmissions, administrativeSubmissions);
