@@ -6,6 +6,7 @@ import UserProfileModal from "../../features/schoolAppraisal/components/UserProf
 import { academicAudit2025Schema } from "../../features/schoolAppraisal/formSchemas";
 import { scrollPageToTop } from "../../utils/scrollToTop";
 import { fetchCurrentAuditCycle } from "../../api/submissions";
+import { fetchCurrentUser } from "../../api/users";
 
 const directorAuditSchema = academicAudit2025Schema;
 const compactYear = (str = "") => {
@@ -26,8 +27,26 @@ export default function DirectorDashboard() {
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [profileOverrides, setProfileOverrides] = useState({});
+  const [accountAvatarUrl, setAccountAvatarUrl] = useState("");
   const [activeSectionId, setActiveSectionId] = useState(directorAuditSchema.sections[0].id);
   const [reportMode, setReportMode] = useState(false);
+
+  // sessionStorage never carries the avatar, and profileOverrides only lives for the rest of
+  // this session after a save in UserProfileModal — without this fetch, the sidebar avatar
+  // reverts to initials on every reload/re-login even though the picture was saved.
+  useEffect(() => {
+    let isActive = true;
+    fetchCurrentUser()
+      .then(({ data }) => {
+        if (!isActive) return;
+        const remote = data?.data || data || {};
+        if (remote.avatarUrl) setAccountAvatarUrl(remote.avatarUrl);
+      })
+      .catch(() => {});
+    return () => {
+      isActive = false;
+    };
+  }, []);
 
   useEffect(() => {
     let isActive = true;
@@ -65,6 +84,7 @@ export default function DirectorDashboard() {
     designation: sessionStorage.getItem("designation") || "Director",
     school: sessionStorage.getItem("school") || "School",
     email: sessionStorage.getItem("email") || sessionStorage.getItem("username") || "",
+    avatarUrl: accountAvatarUrl,
     ...profileOverrides,
   };
 
