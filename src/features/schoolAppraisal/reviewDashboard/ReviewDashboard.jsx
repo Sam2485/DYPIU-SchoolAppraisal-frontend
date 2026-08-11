@@ -2260,6 +2260,11 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
         assignment.requiresAuditorResubmission
       );
       removeStoredAuditorCorrections(submission, currentAssignments, allAssignedAuditorsSubmitted);
+      // Persist this auditor's assignment update even when other assigned posts/auditors
+      // haven't finished yet — otherwise a partial submission never reaches the backend and
+      // dashboards that re-fetch submissions (e.g. the AO's overview) keep showing this
+      // auditor as "Not Submitted" indefinitely, since only the fully-complete case used to
+      // call updateSubmissionById.
       if (allAssignedAuditorsSubmitted) {
         await updateSubmissionById(submission.id, {
           status: backendStatusFor("auditor-completed"),
@@ -2278,6 +2283,11 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
           valuesData,
           tablesData,
           attachments,
+        });
+      } else {
+        await updateSubmissionById(submission.id, {
+          auditorAssignments,
+          auditorProgress,
         });
       }
       const nextStatus = allAssignedAuditorsSubmitted
@@ -2400,6 +2410,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
             <AcademicAdministrativeSubmissionsPanel
               academicSubmissions={submissions.academic}
               administrativeSubmissions={submissions.administrative}
+              loading={loadingSubmissions}
             />
           ) : visibleActiveView === "overview" ? (
             <OverviewPanel
@@ -3134,8 +3145,9 @@ function SubmissionsTableCard({ tabs }) {
   );
 }
 
-function AcademicAdministrativeSubmissionsPanel({ academicSubmissions = [], administrativeSubmissions = [] }) {
+function AcademicAdministrativeSubmissionsPanel({ academicSubmissions = [], administrativeSubmissions = [], loading = false }) {
   const [users, setUsers] = useState([]);
+  const [loadingUsers, setLoadingUsers] = useState(true);
 
   useEffect(() => {
     let isActive = true;
@@ -3145,6 +3157,9 @@ function AcademicAdministrativeSubmissionsPanel({ academicSubmissions = [], admi
       })
       .catch(() => {
         if (isActive) setUsers([]);
+      })
+      .finally(() => {
+        if (isActive) setLoadingUsers(false);
       });
     return () => {
       isActive = false;
@@ -3153,6 +3168,24 @@ function AcademicAdministrativeSubmissionsPanel({ academicSubmissions = [], admi
 
   const directorsBySchool = useMemo(() => mapUsersBySchool(usersForCategory(users, "academic")), [users]);
   const adminUsersByPost = useMemo(() => mapUsersByPost(usersForCategory(users, "administrative")), [users]);
+
+  // Submissions and the auditor account list load via separate async fetches. Computing
+  // "Submitted"/"Not Submitted" coverage before either has arrived would read empty arrays
+  // and render every row as "Not Submitted" — a wrong-looking flash on every reload rather
+  // than an honest loading state. Show a skeleton until both are in.
+  if (loading || loadingUsers) {
+    return (
+      <section style={styles.panel}>
+        <div style={styles.iqacOverviewHeader}>
+          <div>
+            <h1 style={styles.iqacOverviewTitle}>IQAC Dashboard Overview</h1>
+            <p style={styles.iqacOverviewSubtitle}>Monitor forward items, approvals, submissions and auditor activities</p>
+          </div>
+        </div>
+        <SkeletonList rows={5} />
+      </section>
+    );
+  }
 
   const resolveSchoolContact = (submission) => {
     const code = canonicalSchoolCode(submission.school) || String(submission.school || "").trim().toUpperCase();
