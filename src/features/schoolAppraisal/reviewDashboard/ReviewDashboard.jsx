@@ -2755,27 +2755,6 @@ function auditorAccountCoverage(users = [], auditorType, academicSubmissions = [
     if (completed) academicDates.set(code, submission.auditorReviewedOn || submission.submittedOn);
   });
 
-  const adminCompletion = new Map();
-  const adminDates = new Map();
-  administrativeSubmissions.forEach((submission) => {
-    const assignments = submission.auditorAssignments || [];
-    if (assignments.length) {
-      assignments.forEach((assignment) => {
-        if (assignment.auditorType !== auditorType || !assignment.post) return;
-        const completed = auditorAssignmentSubmitted(assignment);
-        if (completed || !adminCompletion.has(assignment.post)) adminCompletion.set(assignment.post, completed);
-        if (completed) adminDates.set(assignment.post, assignment.submittedAt);
-      });
-      return;
-    }
-    if (resolvedAuditorTypeFor(submission) !== auditorType) return;
-    const postCode = canonicalAdministrativePost(submission.post || submission.department || submission.school);
-    if (!postCode) return;
-    const completed = isAuditorCompleted(submission);
-    if (completed || !adminCompletion.has(postCode)) adminCompletion.set(postCode, completed);
-    if (completed) adminDates.set(postCode, submission.auditorReviewedOn || submission.submittedOn);
-  });
-
   const postLabel = (code) => ADMINISTRATIVE_POSTS.find((post) => post.value === code)?.label || code;
 
   const submittedRows = [];
@@ -2783,42 +2762,149 @@ function auditorAccountCoverage(users = [], auditorType, academicSubmissions = [
 
   auditors.forEach((auditor) => {
     const isAcademic = auditor.category === "academic";
-    const keys = isAcademic ? auditor.schools : auditor.administrativePosts;
-    if (!keys?.length) return;
 
-    const completionMap = isAcademic ? academicCompletion : adminCompletion;
-    const dateMap = isAcademic ? academicDates : adminDates;
-    const labelFor = isAcademic ? (key) => key : postLabel;
+    if (isAcademic) {
+      const rawKeys = auditor.schools || [];
+      const keys = rawKeys.map((s) => canonicalSchoolCode(s) || String(s || "").trim().toUpperCase()).filter(Boolean);
+      if (!keys.length) return;
 
-    // Internal is the track every school/post starts on, so an internal auditor's assigned
-    // key shows as "not submitted" even before anything's been forwarded to them — the
-    // account should never be invisible just because nothing has reached them yet. External
-    // only exists once IQAC has actually started it for that key (i.e. it has an entry in
-    // the completion map) — a school/post can't be "pending external" before its internal
-    // cycle is done and IQAC begins the external track, so unstarted keys are omitted rather
-    // than shown as not-submitted.
-    const completedKeys = keys.filter((key) => completionMap.get(key) === true);
-    const pendingKeys = keys.filter((key) => {
-      if (completionMap.get(key) === true) return false;
-      return auditorType === "internal" || completionMap.has(key);
-    });
-
-    if (completedKeys.length) {
-      const dates = completedKeys.map((key) => dateMap.get(key)).filter(Boolean).sort();
-      submittedRows.push({
-        name: auditor.name || "-",
-        email: auditor.email || "-",
-        secondary: completedKeys.map(labelFor).join(", "),
-        date: dates.length ? dates[dates.length - 1] : null,
+      const completedKeys = keys.filter((key) => academicCompletion.get(key) === true);
+      const pendingKeys = keys.filter((key) => {
+        if (academicCompletion.get(key) === true) return false;
+        return auditorType === "internal" || academicCompletion.has(key);
       });
-    }
-    if (pendingKeys.length) {
-      notSubmittedRows.push({
-        name: auditor.name || "-",
-        email: auditor.email || "-",
-        secondary: pendingKeys.map(labelFor).join(", "),
-        date: null,
+
+      if (completedKeys.length) {
+        const dates = completedKeys.map((key) => academicDates.get(key)).filter(Boolean).sort();
+        submittedRows.push({
+          name: auditor.name || "-",
+          email: auditor.email || "-",
+          secondary: completedKeys.join(", "),
+          date: dates.length ? dates[dates.length - 1] : null,
+        });
+      }
+      if (pendingKeys.length) {
+        notSubmittedRows.push({
+          name: auditor.name || "-",
+          email: auditor.email || "-",
+          secondary: pendingKeys.join(", "),
+          date: null,
+        });
+      }
+    } else {
+      // Administrative Auditor: match explicit assignments for this auditor across administrativeSubmissions
+      const auditorIdStr = String(auditor.id || "");
+      const auditorEmailNorm = (auditor.email || "").trim().toLowerCase();
+
+      const myAssignments = [];
+      administrativeSubmissions.forEach((submission) => {
+        const assignments = submission.auditorAssignments || submission.auditorAssignmentStatus || submission.auditorReviews || [];
+        assignments.forEach((assignment) => {
+          const assType = assignment.auditorType ? String(assignment.auditorType).toLowerCase() : "";
+          if (assType && assType !== auditorType) return;
+
+          const assIdStr = String(assignment.auditorId || "");
+          const assEmailNorm = (assignment.auditorEmail || "").trim().toLowerCase();
+
+          const idMatch = auditorIdStr && assIdStr && auditorIdStr === assIdStr;
+          const emailMatch = auditorEmailNorm && assEmailNorm && auditorEmailNorm === assEmailNorm;
+
+          if (idMatch || emailMatch) {
+            myAssignments.push(assignment);
+          }
+        });
       });
+
+      let assignedPostCodes = [];
+      if (myAssignments.length > 0) {
+        assignedPostCodes = Array.from(
+          new Set(
+            myAssignments
+              .map((a) => canonicalAdministrativePost(a.post) || a.post)
+              .filter(Boolean)
+          )
+        );
+      } else {
+        const rawPosts = auditor.administrativePosts || (auditor.post ? [auditor.post] : []);
+        assignedPostCodes = Array.from(
+          new Set(
+            rawPosts
+              .map((p) => canonicalAdministrativePost(p) || p)
+              .filter(Boolean)
+          )
+        );
+      }
+
+      if (!assignedPostCodes.length) return;
+
+      const completedPosts = [];
+      const pendingPosts = [];
+      const postDates = new Map();
+
+      assignedPostCodes.forEach((postCode) => {
+        const matchingAss = myAssignments.find(
+          (a) => (canonicalAdministrativePost(a.post) || a.post) === postCode
+        );
+
+        if (matchingAss) {
+          if (auditorAssignmentSubmitted(matchingAss)) {
+            completedPosts.push(postCode);
+            if (matchingAss.submittedAt) {
+              postDates.set(postCode, matchingAss.submittedAt);
+            }
+          } else {
+            pendingPosts.push(postCode);
+          }
+        } else {
+          let globalCompleted = false;
+          let globalDate = null;
+          administrativeSubmissions.forEach((submission) => {
+            const assignments = submission.auditorAssignments || submission.auditorAssignmentStatus || submission.auditorReviews || [];
+            assignments.forEach((a) => {
+              const aType = a.auditorType ? String(a.auditorType).toLowerCase() : "";
+              if (aType === auditorType && (canonicalAdministrativePost(a.post) || a.post) === postCode) {
+                if (auditorAssignmentSubmitted(a)) {
+                  globalCompleted = true;
+                  if (a.submittedAt) globalDate = a.submittedAt;
+                }
+              }
+            });
+            if (!assignments.length && resolvedAuditorTypeFor(submission) === auditorType) {
+              if (isAuditorCompleted(submission)) {
+                globalCompleted = true;
+                globalDate = submission.auditorReviewedOn || submission.submittedOn;
+              }
+            }
+          });
+
+          if (globalCompleted) {
+            completedPosts.push(postCode);
+            if (globalDate) postDates.set(postCode, globalDate);
+          } else {
+            if (auditorType === "internal" || myAssignments.length > 0) {
+              pendingPosts.push(postCode);
+            }
+          }
+        }
+      });
+
+      if (completedPosts.length) {
+        const dates = completedPosts.map((p) => postDates.get(p)).filter(Boolean).sort();
+        submittedRows.push({
+          name: auditor.name || "-",
+          email: auditor.email || "-",
+          secondary: completedPosts.map(postLabel).join(", "),
+          date: dates.length ? dates[dates.length - 1] : null,
+        });
+      }
+      if (pendingPosts.length) {
+        notSubmittedRows.push({
+          name: auditor.name || "-",
+          email: auditor.email || "-",
+          secondary: pendingPosts.map(postLabel).join(", "),
+          date: null,
+        });
+      }
     }
   });
 
