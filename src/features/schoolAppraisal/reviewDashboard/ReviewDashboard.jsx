@@ -2922,12 +2922,16 @@ function pendingForwardCount(academicSubmissions = [], administrativeSubmissions
 
   academicSubmissions.forEach((submission) => {
     if (normalizeStatus(submission.status) === "draft") return;
-    if (submission.forwardedAt) return;
+    if (hasAuditorAssignment(submission)) return;
     const track = resolvedAuditorTypeFor(submission);
     if (track === auditorType || (!track && auditorType === "internal")) count += 1;
   });
 
   administrativeSubmissions.forEach((submission) => {
+    // Already-approved/completed submissions are done — their per-post auditorAssignments
+    // history can be sparse or stale (e.g. predating the per-post assignment feature), which
+    // would otherwise look like an unassigned post still awaiting a forward.
+    if (isAuditorCompleted(submission)) return;
     const track = resolvedAuditorTypeFor(submission);
     if (track !== auditorType && !(!track && auditorType === "internal")) return;
     // Administrative posts share a single office-wide form, so a pending forward counts as
