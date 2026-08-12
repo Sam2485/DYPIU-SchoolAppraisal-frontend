@@ -352,6 +352,7 @@ const withAuditorSignOff = (values = {}, profile = {}, auditedAt = new Date().to
   },
 });
 const getAuditorSignOff = (values = {}) => values[SIGN_OFF_FIELD]?.auditedBy || values[SIGN_OFF_FIELD]?.auditorBy || {};
+const getSubmitterSignOff = (values = {}) => values[SIGN_OFF_FIELD]?.submittedBy || {};
 const getSubmissionAuditorSignOff = (submission = {}) => {
   const storedSignOff = getAuditorSignOff(submission.values);
   return {
@@ -397,9 +398,26 @@ const allAuditorAssignmentsSubmitted = (submission = {}) => {
   const assignments = submittedAuditorAssignmentsForSubmission(submission);
   return assignments.length > 0 && assignments.every(auditorAssignmentSubmitted);
 };
+// A next-cycle submission (e.g. the external cycle spawned when IQAC clicks "Start External
+// Cycle") is created from the prior, already-approved cycle via preserveApprovedVersion, and
+// can carry that cycle's status/auditorReviewedOn/auditorReviewedBy/submittedOn forward as stale
+// leftovers. Until this record has evidence of its own (a real assignment, or an actual sign-off
+// recorded in its own values), don't let those inherited fields count as proof that THIS cycle
+// was touched — otherwise a freshly started external cycle looks submitted/completed before the
+// director has even opened the form.
+const isFreshCycleSuccessor = (submission = {}) =>
+  Boolean(submission.previousApprovedSubmissionId) &&
+  submittedAuditorAssignmentsForSubmission(submission).length === 0 &&
+  !Number(submission.auditorProgress?.total || 0);
 const isAuditorCompleted = (submission = {}) => {
   if (submission.status === "submitted" || isAuditorCorrectionRequested(submission)) return false;
-  if (["auditor-completed", "approved"].includes(submission.status)) return true;
+
+  const freshSuccessor = isFreshCycleSuccessor(submission);
+  const ownSignOffDate = getAuditorSignOff(submission.values).date;
+
+  if (["auditor-completed", "approved"].includes(submission.status)) {
+    return freshSuccessor ? Boolean(ownSignOffDate) : true;
+  }
 
   if (submission.auditType === "administrative") {
     const progress = submission.auditorProgress || {};
@@ -424,11 +442,13 @@ const isAuditorCompleted = (submission = {}) => {
   }
 
   return Boolean(
-    submission.allAuditorsSubmitted ||
-    progress.allSubmitted ||
-    submission.auditorReviewedOn ||
-    submission.auditorReviewedBy ||
-    getAuditorSignOff(submission.values).date
+    (!freshSuccessor && (
+      submission.allAuditorsSubmitted ||
+      progress.allSubmitted ||
+      submission.auditorReviewedOn ||
+      submission.auditorReviewedBy
+    )) ||
+    ownSignOffDate
   );
 };
 const responseList = (payload) => {
@@ -3022,6 +3042,11 @@ function pendingForwardCount(academicSubmissions = [], administrativeSubmissions
   academicSubmissions.forEach((submission) => {
     if (normalizeStatus(submission.status) === "draft") return;
     if (hasAuditorAssignment(submission)) return;
+    // A freshly spawned next-cycle submission (e.g. right after IQAC starts the external cycle)
+    // can carry a non-draft status forward from the cycle it succeeded, even though the
+    // director hasn't opened/submitted this cycle's form yet. Only count it once the director
+    // has genuinely submitted THIS record (its own submitter sign-off is recorded).
+    if (isFreshCycleSuccessor(submission) && !getSubmitterSignOff(submission.values).date) return;
     const track = resolvedAuditorTypeFor(submission);
     if (track === auditorType || (!track && auditorType === "internal")) count += 1;
   });
