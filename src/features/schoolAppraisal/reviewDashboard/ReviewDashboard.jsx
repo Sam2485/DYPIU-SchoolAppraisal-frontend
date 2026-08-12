@@ -1369,6 +1369,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
   );
   const [activeAcademicYear, setActiveAcademicYear] = useState("");
   const [availableYears, setAvailableYears] = useState(["2025-26", "2026-27"]);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     let isActive = true;
@@ -1394,11 +1395,10 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
     return () => {
       isActive = false;
     };
-  }, [isIqacDashboard]);
+  }, [isIqacDashboard, refreshKey]);
 
   const [showNextYearModal, setShowNextYearModal] = useState(false);
   const [startingAcademicYear, setStartingAcademicYear] = useState(false);
-  const [refreshKey, setRefreshKey] = useState(0);
   const [auditorProfile, setAuditorProfile] = useState(null);
   const [accountProfile, setAccountProfile] = useState(null);
   const canManageUsers = role === "iqac";
@@ -2411,6 +2411,8 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
               academicSubmissions={submissions.academic}
               administrativeSubmissions={submissions.administrative}
               loading={loadingSubmissions}
+              academicYear={academicYear}
+              availableYears={availableYears}
             />
           ) : visibleActiveView === "overview" ? (
             <OverviewPanel
@@ -2730,6 +2732,95 @@ function appendStartedButUnfiledExternalCycles(notSubmittedRows, coveredKeys, su
   });
 }
 
+// Auditor accounts are hard-deleted (no soft-delete/year scoping on the backend), so once an
+// auditor is removed they vanish from the live `users` roster for every year, past and future.
+// Without this, their completed work would disappear from a past year's overview the moment
+// they're deleted, even though that work is still on record inside the submissions themselves.
+// These two helpers reconstruct "ghost" rows for auditors evidenced by (year-filtered)
+// submission data but absent from the live roster — so a deleted auditor's completed
+// schools/posts stay visible for the year they actually did them, while a fresh year (which
+// has no submissions referencing them) naturally shows nothing for them at all.
+function academicGhostAuditorRows(academicSubmissions = [], auditorType, knownEmails) {
+  const byEmail = new Map();
+  academicSubmissions.forEach((submission) => {
+    if (resolvedAuditorTypeFor(submission) !== auditorType || !isAuditorCompleted(submission)) return;
+    const emailKey = normalizeAuditAssignment(submission.auditorReviewedByEmail || "");
+    if (!emailKey || knownEmails.has(emailKey)) return;
+    const code = canonicalSchoolCode(submission.school) || String(submission.school || "").trim().toUpperCase();
+    if (!code) return;
+    const entry = byEmail.get(emailKey) || {
+      name: submission.auditorReviewedBy || "-",
+      email: submission.auditorReviewedByEmail,
+      keys: new Set(),
+      dates: [],
+    };
+    entry.keys.add(code);
+    const date = submission.auditorReviewedOn || submission.submittedOn;
+    if (date) entry.dates.push(date);
+    byEmail.set(emailKey, entry);
+  });
+  return [...byEmail.values()].map((entry) => ({
+    name: entry.name,
+    email: entry.email,
+    secondary: [...entry.keys].join(", "),
+    date: entry.dates.sort().slice(-1)[0] || null,
+  }));
+}
+
+function administrativeGhostAuditorRows(administrativeSubmissions = [], auditorType, knownEmails) {
+  const postLabel = (code) => ADMINISTRATIVE_POSTS.find((post) => post.value === code)?.label || code;
+  const byEmail = new Map();
+
+  administrativeSubmissions.forEach((submission) => {
+    const assignments = submission.auditorAssignments || submission.auditorAssignmentStatus || submission.auditorReviews || [];
+    if (assignments.length) {
+      assignments.forEach((assignment) => {
+        const assType = assignment.auditorType ? String(assignment.auditorType).toLowerCase() : "";
+        if (assType && assType !== auditorType) return;
+        if (!auditorAssignmentSubmitted(assignment)) return;
+        const emailKey = normalizeAuditAssignment(assignment.auditorEmail || "");
+        if (!emailKey || knownEmails.has(emailKey)) return;
+        const postCode = canonicalAdministrativePost(assignment.post) || assignment.post;
+        if (!postCode) return;
+        const entry = byEmail.get(emailKey) || {
+          name: assignment.auditorName || "-",
+          email: assignment.auditorEmail,
+          keys: new Set(),
+          dates: [],
+        };
+        entry.keys.add(postCode);
+        if (assignment.submittedAt) entry.dates.push(assignment.submittedAt);
+        byEmail.set(emailKey, entry);
+      });
+      return;
+    }
+
+    if (resolvedAuditorTypeFor(submission) !== auditorType || !isAuditorCompleted(submission)) return;
+    const emailKey = normalizeAuditAssignment(submission.auditorReviewedByEmail || "");
+    if (!emailKey || knownEmails.has(emailKey)) return;
+    const entry = byEmail.get(emailKey) || {
+      name: submission.auditorReviewedBy || "-",
+      email: submission.auditorReviewedByEmail,
+      keys: new Set(),
+      dates: [],
+    };
+    administrativeSubmittedPostsFor(submission).forEach((post) => {
+      const postCode = canonicalAdministrativePost(post) || post;
+      if (postCode) entry.keys.add(postCode);
+    });
+    const date = submission.auditorReviewedOn || submission.submittedOn;
+    if (date) entry.dates.push(date);
+    byEmail.set(emailKey, entry);
+  });
+
+  return [...byEmail.values()].map((entry) => ({
+    name: entry.name,
+    email: entry.email,
+    secondary: [...entry.keys].map(postLabel).join(", "),
+    date: entry.dates.sort().slice(-1)[0] || null,
+  }));
+}
+
 // Internal/External auditor coverage is driven by actual auditor ACCOUNTS and their
 // assigned schools/posts — not by whatever a submission's forwardedAuditorType/reportCategory
 // happens to say (those can be pre-classified before any real auditor has been created or
@@ -2907,6 +2998,14 @@ function auditorAccountCoverage(users = [], auditorType, academicSubmissions = [
       }
     }
   });
+
+  const knownEmails = new Set(auditors.map((auditor) => normalizeAuditAssignment(auditor.email || "")).filter(Boolean));
+  if (!categoryFilter || categoryFilter === "academic") {
+    submittedRows.push(...academicGhostAuditorRows(academicSubmissions, auditorType, knownEmails));
+  }
+  if (!categoryFilter || categoryFilter === "administrative") {
+    submittedRows.push(...administrativeGhostAuditorRows(administrativeSubmissions, auditorType, knownEmails));
+  }
 
   return { submittedRows, notSubmittedRows };
 }
@@ -3235,7 +3334,13 @@ function SubmissionsTableCard({ tabs }) {
   );
 }
 
-function AcademicAdministrativeSubmissionsPanel({ academicSubmissions = [], administrativeSubmissions = [], loading = false }) {
+function AcademicAdministrativeSubmissionsPanel({
+  academicSubmissions = [],
+  administrativeSubmissions = [],
+  loading = false,
+  academicYear,
+  availableYears: cycleAvailableYears = [],
+}) {
   const [users, setUsers] = useState([]);
   const [loadingUsers, setLoadingUsers] = useState(true);
 
@@ -3258,6 +3363,43 @@ function AcademicAdministrativeSubmissionsPanel({ academicSubmissions = [], admi
 
   const directorsBySchool = useMemo(() => mapUsersBySchool(usersForCategory(users, "academic")), [users]);
   const adminUsersByPost = useMemo(() => mapUsersByPost(usersForCategory(users, "administrative")), [users]);
+
+  // Every year's IQAC dashboard route runs the same coverage math over the same
+  // fetchAllSubmissions() feed — nothing upstream scopes it to a single academic year, so
+  // starting a new year previously left last year's "Submitted" schools sitting alongside this
+  // year's fresh "Not Submitted" ones (and left the external cycle showing only stale prior-year
+  // rows instead of an honest empty state). Scoping both submission lists to one selected year
+  // before any coverage function sees them fixes both at the source.
+  const currentYear = compactAcademicYear(academicYear || "");
+  const availableYears = useMemo(() => {
+    const years = new Set(cycleAvailableYears.map(compactAcademicYear));
+    if (currentYear) years.add(currentYear);
+    academicSubmissions.forEach((submission) => years.add(compactAcademicYear(submission.auditCycle || currentYear)));
+    administrativeSubmissions.forEach((submission) => years.add(compactAcademicYear(submission.auditCycle || currentYear)));
+    return [...years].filter(Boolean).sort((first, second) => Number(second.slice(0, 4)) - Number(first.slice(0, 4)));
+  }, [cycleAvailableYears, currentYear, academicSubmissions, administrativeSubmissions]);
+  const [selectedYear, setSelectedYear] = useState(currentYear);
+  // The active academic year only ever changes when IQAC starts a new one (there's no other
+  // way to get here mid-session) — when that happens, snap the dropdown to the new year so the
+  // overview shows the fresh (all "Not Submitted") year by default instead of quietly staying
+  // parked on whichever year was selected before the switch. Adjusted during render (React's
+  // recommended pattern for syncing state to a changed prop) rather than in an effect, so the
+  // switch is visible on the very render that receives the new year instead of one render later.
+  const [trackedCurrentYear, setTrackedCurrentYear] = useState(currentYear);
+  if (currentYear && currentYear !== trackedCurrentYear) {
+    setTrackedCurrentYear(currentYear);
+    setSelectedYear(currentYear);
+  }
+  const effectiveSelectedYear = selectedYear || currentYear;
+
+  const yearAcademicSubmissions = useMemo(
+    () => academicSubmissions.filter((submission) => compactAcademicYear(submission.auditCycle || currentYear) === effectiveSelectedYear),
+    [academicSubmissions, currentYear, effectiveSelectedYear]
+  );
+  const yearAdministrativeSubmissions = useMemo(
+    () => administrativeSubmissions.filter((submission) => compactAcademicYear(submission.auditCycle || currentYear) === effectiveSelectedYear),
+    [administrativeSubmissions, currentYear, effectiveSelectedYear]
+  );
 
   // Submissions and the auditor account list load via separate async fetches. Computing
   // "Submitted"/"Not Submitted" coverage before either has arrived would read empty arrays
@@ -3282,10 +3424,10 @@ function AcademicAdministrativeSubmissionsPanel({ academicSubmissions = [], admi
     const director = directorsBySchool[code];
     return { name: director?.name, email: director?.email, secondary: submission.school || director?.school || code };
   };
-  const schoolsInternal = auditorTypeCoverageWithRows(academicSubmissions, "internal", resolveSchoolContact);
-  const schoolsExternal = auditorTypeCoverageWithRows(academicSubmissions, "external", resolveSchoolContact);
-  const adminInternal = administrativePostCoverageWithRows(administrativeSubmissions, "internal", adminUsersByPost);
-  const adminExternal = administrativePostCoverageWithRows(administrativeSubmissions, "external", adminUsersByPost);
+  const schoolsInternal = auditorTypeCoverageWithRows(yearAcademicSubmissions, "internal", resolveSchoolContact);
+  const schoolsExternal = auditorTypeCoverageWithRows(yearAcademicSubmissions, "external", resolveSchoolContact);
+  const adminInternal = administrativePostCoverageWithRows(yearAdministrativeSubmissions, "internal", adminUsersByPost);
+  const adminExternal = administrativePostCoverageWithRows(yearAdministrativeSubmissions, "external", adminUsersByPost);
 
   // Director accounts that don't have a submission classified into an auditor cycle yet
   // (brand-new accounts, or a submitted-but-not-yet-forwarded form) default into the
@@ -3294,28 +3436,28 @@ function AcademicAdministrativeSubmissionsPanel({ academicSubmissions = [], admi
   // already puts every post without a submitted section into "Not Submitted" directly.)
   appendUnclassifiedAccounts(
     schoolsInternal.notSubmittedRows,
-    classifiedAcademicSchoolCodes(academicSubmissions),
+    classifiedAcademicSchoolCodes(yearAcademicSubmissions),
     directorsBySchool,
     (code, director) => director.school || code
   );
 
   const externalCoveredSchoolCodes = new Set(
-    academicSubmissions
+    yearAcademicSubmissions
       .filter((submission) => resolvedAuditorTypeFor(submission) === "external")
       .map((submission) => canonicalSchoolCode(submission.school) || String(submission.school || "").trim().toUpperCase())
   );
   appendStartedButUnfiledExternalCycles(
     schoolsExternal.notSubmittedRows,
     externalCoveredSchoolCodes,
-    academicSubmissions,
+    yearAcademicSubmissions,
     (submission) => canonicalSchoolCode(submission.school) || String(submission.school || "").trim().toUpperCase(),
     resolveSchoolContact
   );
 
-  const academicInternalAuditor = auditorAccountCoverage(users, "internal", academicSubmissions, administrativeSubmissions, "academic");
-  const academicExternalAuditor = auditorAccountCoverage(users, "external", academicSubmissions, administrativeSubmissions, "academic");
-  const adminInternalAuditor = auditorAccountCoverage(users, "internal", academicSubmissions, administrativeSubmissions, "administrative");
-  const adminExternalAuditor = auditorAccountCoverage(users, "external", academicSubmissions, administrativeSubmissions, "administrative");
+  const academicInternalAuditor = auditorAccountCoverage(users, "internal", yearAcademicSubmissions, yearAdministrativeSubmissions, "academic");
+  const academicExternalAuditor = auditorAccountCoverage(users, "external", yearAcademicSubmissions, yearAdministrativeSubmissions, "academic");
+  const adminInternalAuditor = auditorAccountCoverage(users, "internal", yearAcademicSubmissions, yearAdministrativeSubmissions, "administrative");
+  const adminExternalAuditor = auditorAccountCoverage(users, "external", yearAcademicSubmissions, yearAdministrativeSubmissions, "administrative");
 
   // Each track (internal/external) keeps its own untouched row list — nothing here merges
   // schoolsInternal with schoolsExternal, so a school/post/auditor can't show up twice just
@@ -3329,9 +3471,9 @@ function AcademicAdministrativeSubmissionsPanel({ academicSubmissions = [], admi
   const adminInternalAuditorRows = combinedStatusRows(adminInternalAuditor);
   const adminExternalAuditorRows = combinedStatusRows(adminExternalAuditor);
 
-  const allSubmissionsForApproval = [...academicSubmissions, ...administrativeSubmissions];
-  const forwardInternalCount = pendingForwardCount(academicSubmissions, administrativeSubmissions, "internal");
-  const forwardExternalCount = pendingForwardCount(academicSubmissions, administrativeSubmissions, "external");
+  const allSubmissionsForApproval = [...yearAcademicSubmissions, ...yearAdministrativeSubmissions];
+  const forwardInternalCount = pendingForwardCount(yearAcademicSubmissions, yearAdministrativeSubmissions, "internal");
+  const forwardExternalCount = pendingForwardCount(yearAcademicSubmissions, yearAdministrativeSubmissions, "external");
   const approveInternalCount = pendingApproveCount(allSubmissionsForApproval, "internal");
   const approveExternalCount = pendingApproveCount(allSubmissionsForApproval, "external");
 
@@ -3346,17 +3488,30 @@ function AcademicAdministrativeSubmissionsPanel({ academicSubmissions = [], admi
           <h1 style={styles.iqacOverviewTitle}>IQAC Dashboard Overview</h1>
           <p style={styles.iqacOverviewSubtitle}>Monitor forward items, approvals, submissions and auditor activities</p>
         </div>
-        <div style={styles.iqacDateCard}>
-          <span style={styles.iqacDateIconWrap} aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" style={{ width: 18, height: 18 }}>
-              <rect x="3" y="4.5" width="18" height="16" rx="2" />
-              <path d="M16 2.5v4M8 2.5v4M3 10h18" />
-            </svg>
-          </span>
-          <span>
-            <strong style={styles.iqacDateStrong}>{todayLabel}</strong>
-            <small style={styles.iqacDateWeekday}>{weekdayLabel}</small>
-          </span>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <label style={styles.yearFilter}>
+            <span>Academic year</span>
+            <select
+              className="audit-control"
+              value={effectiveSelectedYear}
+              onChange={(event) => setSelectedYear(event.target.value)}
+              style={styles.yearSelect}
+            >
+              {availableYears.map((year) => <option key={year} value={year}>{year}</option>)}
+            </select>
+          </label>
+          <div style={styles.iqacDateCard}>
+            <span style={styles.iqacDateIconWrap} aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" style={{ width: 18, height: 18 }}>
+                <rect x="3" y="4.5" width="18" height="16" rx="2" />
+                <path d="M16 2.5v4M8 2.5v4M3 10h18" />
+              </svg>
+            </span>
+            <span>
+              <strong style={styles.iqacDateStrong}>{todayLabel}</strong>
+              <small style={styles.iqacDateWeekday}>{weekdayLabel}</small>
+            </span>
+          </div>
         </div>
       </div>
 
