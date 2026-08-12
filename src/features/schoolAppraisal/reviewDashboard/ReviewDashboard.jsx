@@ -641,6 +641,12 @@ const isAdministrativeContributorStage = (submission = {}) =>
   submission.auditType === "administrative" &&
   contributorStageStatuses.has(normalizeStatus(submission.overallStatus || submission.status));
 const canForwardSubmissionToAuditor = (submission = {}) => {
+  // A fresh cycle record (e.g. one just spawned for a new academic year) can carry a non-draft
+  // status and even forwarding-related fields inherited from the approved cycle it succeeded,
+  // before the director has opened this cycle's form at all. Forwarding must never be possible
+  // until the submitter has genuinely submitted THIS record — this overrides any backend
+  // canForwardToAuditor flag, since that flag isn't aware of this inherited-status case.
+  if (normalizeStatus(submission.status) === "draft" || !getSubmitterSignOff(submission.values).date) return false;
   if (submission.canForwardToAuditor !== null && submission.canForwardToAuditor !== undefined) {
     return submission.canForwardToAuditor;
   }
@@ -1250,16 +1256,30 @@ const normalizeSubmission = (submission = {}) => {
       : assignmentBase;
   });
   const backendAuditorProgress = safeObjectValue(submission.auditorProgress);
+  // The backend's own auditorAssignments feed intentionally merges the current submission's
+  // assignments with its parent/root cycle's (so peer-review "reference" panels can show a prior
+  // cycle's completed review as context). backendAuditorProgress.total/submitted, however, is
+  // computed backend-side scoped to THIS submission's own assignment rows only. Recomputing
+  // progress by counting every entry in the merged array (as buildAuditorProgress does) double
+  // counts a prior cycle's already-completed review as if it belonged to this fresh cycle — e.g.
+  // a brand-new external cycle showing "1/2 reviews submitted" from an internal auditor who only
+  // ever reviewed the OLD cycle it was spawned from. Prefer the backend's pre-scoped total
+  // whenever it's present; only fall back to recomputing from the merged list when the backend
+  // hasn't provided one at all.
   const computedAuditorProgress = buildAuditorProgress(auditorAssignments);
-  const auditorProgress = auditorAssignments.length
-    ? computedAuditorProgress
-    : {
+  // Check for the key's presence, not a truthy value — the backend legitimately reports an
+  // all-zero progress object (no live assignments on this submission yet), which must NOT fall
+  // through to recomputing from the merged (possibly ancestor-polluted) list.
+  const hasBackendAuditorProgress = Object.keys(backendAuditorProgress).length > 0;
+  const auditorProgress = hasBackendAuditorProgress
+    ? {
         total: Number(backendAuditorProgress.total || backendAuditorProgress.required || 0),
         submitted: Number(backendAuditorProgress.submitted || backendAuditorProgress.completed || 0),
         pending: Number(backendAuditorProgress.pending || 0),
         allSubmitted: Boolean(backendAuditorProgress.allSubmitted || backendAuditorProgress.allAuditorsSubmitted),
         byPost: arrayValue(backendAuditorProgress.byPost || backendAuditorProgress.posts),
-      };
+      }
+    : computedAuditorProgress;
   if (auditorProgress.total && !auditorProgress.pending) {
     auditorProgress.pending = Math.max(auditorProgress.total - auditorProgress.submitted, 0);
   }
@@ -2479,8 +2499,10 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
 
           {!selectedSubmission && visibleActiveView === "academic" && (
             <AuditReviewPanel
+              key={academicYear}
               auditType="academic"
               submissions={intakeSubmissions.academic}
+              academicYear={academicYear}
               activeGroup={activeGroup.academic}
               onGroupChange={(group) => setActiveGroup((current) => ({ ...current, academic: group }))}
               onOpen={openSubmission}
@@ -2494,8 +2516,10 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
 
           {!selectedSubmission && visibleActiveView === "administrative" && (
             <AuditReviewPanel
+              key={academicYear}
               auditType="administrative"
               submissions={intakeSubmissions.administrative}
+              academicYear={academicYear}
               activeGroup={activeGroup.administrative}
               onGroupChange={(group) => setActiveGroup((current) => ({ ...current, administrative: group }))}
               onOpen={openSubmission}
@@ -3030,6 +3054,19 @@ function auditorAccountCoverage(users = [], auditorType, academicSubmissions = [
   return { submittedRows, notSubmittedRows };
 }
 
+// Posts on an administrative submission that have been submitted but have no auditor
+// assignment recorded yet. Shared by pendingForwardCount and the SubmissionCard "Forwarded"
+// banner so both agree on what's actually still outstanding — an office can show a
+// "Forwarded to auditor" banner for one post while several others were never forwarded at
+// all, which looked like a completed submission until this was surfaced explicitly.
+function administrativeUnassignedPostsFor(submission = {}) {
+  const assignedPosts = new Set(
+    (submission.auditorAssignments || []).map((assignment) => canonicalAdministrativePost(assignment.post) || assignment.post)
+  );
+  const submittedPosts = administrativeSubmittedPostsFor(submission).map((post) => canonicalAdministrativePost(post) || post);
+  return submittedPosts.filter((postCode) => !assignedPosts.has(postCode));
+}
+
 // How many items (academic submissions, or individual administrative posts) are ready for
 // IQAC to forward to an auditor of the given type — i.e. the director/post-holder has
 // submitted, but nobody has forwarded it to a specific auditor yet. A submission/post with
@@ -3060,9 +3097,7 @@ function pendingForwardCount(academicSubmissions = [], administrativeSubmissions
     if (track !== auditorType && !(!track && auditorType === "internal")) return;
     // Administrative posts share a single office-wide form, so a pending forward counts as
     // one item (not one per contributing post) once any submitted post lacks an auditor.
-    const assignedPosts = new Set((submission.auditorAssignments || []).map((assignment) => assignment.post));
-    const submittedPosts = administrativeSubmittedPostsFor(submission).map((post) => canonicalAdministrativePost(post) || post);
-    if (submittedPosts.some((postCode) => !assignedPosts.has(postCode))) count += 1;
+    if (administrativeUnassignedPostsFor(submission).length) count += 1;
   });
 
   return count;
@@ -3097,7 +3132,16 @@ function auditorTypeCoverageWithRows(submissions = [], auditorType, resolveConta
 
   relevant.forEach((submission) => {
     const contact = resolveContact(submission) || {};
-    const isDraft = normalizeStatus(submission.status) === "draft";
+    // A freshly spawned cycle record — whether from "Start External Cycle" on a single
+    // submission or the bulk "Start Next Academic Year" action — can be cloned from an
+    // already-approved prior cycle and inherit its non-draft status and submittedOn date, even
+    // though the director hasn't opened this cycle's form yet. isFreshCycleSuccessor only
+    // catches the per-submission clone path (it keys off previousApprovedSubmissionId, which the
+    // bulk yearly reset doesn't set), so fall back to the one signal that's true regardless of how
+    // the record got its status: whether THIS record has ever actually been run through the
+    // director's own submit action (values.__auditSignOff.submittedBy.date, set only by
+    // withSubmitterSignOff at genuine submit time).
+    const isDraft = normalizeStatus(submission.status) === "draft" || !getSubmitterSignOff(submission.values).date;
     const row = {
       name: submission.submittedBy || contact.name || "-",
       email: contact.email || "-",
@@ -3713,12 +3757,24 @@ function SchoolProgressPanel({ schools, loading }) {
   );
 }
 
-function AuditReviewPanel({ auditType, submissions, activeGroup, onGroupChange, onOpen, onForward, onDownload, downloadingAttachmentsId, loading, resolveSubmitterAvatar }) {
-  const filtered = activeGroup === "all" ? submissions : submissions.filter((submission) => submission.group === activeGroup);
+function AuditReviewPanel({ auditType, submissions, activeGroup, onGroupChange, onOpen, onForward, onDownload, downloadingAttachmentsId, loading, resolveSubmitterAvatar, academicYear }) {
+  const currentYear = compactAcademicYear(academicYear);
+  const availableYears = useMemo(() => {
+    const years = new Set([currentYear]);
+    submissions.forEach((submission) => years.add(compactAcademicYear(submission.auditCycle || currentYear)));
+    return [...years].filter(Boolean).sort((first, second) => Number(second.slice(0, 4)) - Number(first.slice(0, 4)));
+  }, [currentYear, submissions]);
+  const [selectedYear, setSelectedYear] = useState(currentYear);
+  const effectiveSelectedYear = selectedYear || currentYear;
+  const yearSubmissions = useMemo(
+    () => submissions.filter((submission) => compactAcademicYear(submission.auditCycle || currentYear) === effectiveSelectedYear),
+    [submissions, currentYear, effectiveSelectedYear]
+  );
+  const filtered = activeGroup === "all" ? yearSubmissions : yearSubmissions.filter((submission) => submission.group === activeGroup);
   const counts = {
-    all: submissions.length,
-    engineering: submissions.filter((submission) => submission.group === "engineering").length,
-    nonEngineering: submissions.filter((submission) => submission.group === "nonEngineering").length,
+    all: yearSubmissions.length,
+    engineering: yearSubmissions.filter((submission) => submission.group === "engineering").length,
+    nonEngineering: yearSubmissions.filter((submission) => submission.group === "nonEngineering").length,
   };
   const showGroupTabs = auditType === "academic";
 
@@ -3728,11 +3784,24 @@ function AuditReviewPanel({ auditType, submissions, activeGroup, onGroupChange, 
         <div style={styles.blueHeading}>
           <h2 style={styles.sectionTitle}>{auditLabels[auditType]} Reviews</h2>
         </div>
-        <span style={styles.schoolCount}>
-          {auditType === "administrative"
-            ? `${filtered.length} ${filtered.length === 1 ? "submission" : "submissions"}`
-            : `${filtered.length} ${filtered.length === 1 ? "school" : "schools"}`}
-        </span>
+        <div style={styles.pageTitleActions}>
+          <label style={styles.yearFilter}>
+            <span>Academic year</span>
+            <select
+              className="audit-control"
+              value={effectiveSelectedYear}
+              onChange={(event) => setSelectedYear(event.target.value)}
+              style={styles.yearSelect}
+            >
+              {availableYears.map((year) => <option key={year} value={year}>{year}</option>)}
+            </select>
+          </label>
+          <span style={styles.schoolCount}>
+            {auditType === "administrative"
+              ? `${filtered.length} ${filtered.length === 1 ? "submission" : "submissions"}`
+              : `${filtered.length} ${filtered.length === 1 ? "school" : "schools"}`}
+          </span>
+        </div>
       </div>
 
       {showGroupTabs && (
@@ -4005,6 +4074,9 @@ function SubmissionCard({
   const submitterInitials = submission.submittedBy && submission.submittedBy !== "-"
     ? initialsFor(submission.submittedBy)
     : initialsFor(submission.school);
+  const unassignedAdministrativePostLabels = submission.auditType === "administrative"
+    ? administrativeUnassignedPostsFor(submission).map((post) => ADMINISTRATIVE_POSTS.find((option) => option.value === post)?.label || post)
+    : [];
   return (
     <article className="app-surface-card review-submission-card" style={styles.submissionCard}>
       <div style={styles.submissionTop}>
@@ -4044,6 +4116,11 @@ function SubmissionCard({
               ? `${forwardedAuditorCount} matching auditor${forwardedAuditorCount === 1 ? "" : "s"}`
               : submission.forwardedToAuditorEmail}
           </small>
+          {unassignedAdministrativePostLabels.length > 0 && (
+            <small style={styles.forwardedGapWarning}>
+              {unassignedAdministrativePostLabels.length} post{unassignedAdministrativePostLabels.length === 1 ? "" : "s"} still need forwarding: {unassignedAdministrativePostLabels.join(", ")}
+            </small>
+          )}
         </div>
       )}
 
@@ -6635,6 +6712,13 @@ const styles = {
     color: "#075985",
     background: "#f0f9ff",
     fontSize: 11.5,
+  },
+  forwardedGapWarning: {
+    marginTop: 4,
+    paddingTop: 6,
+    borderTop: "1px dashed #bae6fd",
+    color: "#b45309",
+    fontWeight: 700,
   },
   auditorProgressPanel: {
     display: "grid",
