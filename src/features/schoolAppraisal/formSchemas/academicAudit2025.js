@@ -88,7 +88,9 @@ export const academicAudit2025Schema = {
             {
               id: "nepStatus",
               title: "4. NEP 2020 implementation status",
-              columns: ["SN", "Check Points", "Availability", "Link for the Document"],
+              columns: ["SN", "Check Points", "Availability", "SDG Address", "Link for the Document"],
+              textareaColumns: ["SDG Address"],
+              textareaMaxLengths: { "SDG Address": 500 },
               initialRows: [
                 { SN: "1", "Check Points": "NEP Governance Structure" },
                 { SN: "2", "Check Points": "Curriculum Alignment with NEP" },
@@ -152,7 +154,9 @@ export const academicAudit2025Schema = {
         {
           id: "nepStatus",
           title: "4. NEP 2020 implementation status",
-          columns: ["SN", "Check Points", "Availability", "Link for the Document"],
+          columns: ["SN", "Check Points", "Availability", "SDG Address", "Link for the Document"],
+          textareaColumns: ["SDG Address"],
+          textareaMaxLengths: { "SDG Address": 500 },
           initialRows: [
             { SN: "1", "Check Points": "NEP Governance Structure" },
             { SN: "2", "Check Points": "Curriculum Alignment with NEP" },
