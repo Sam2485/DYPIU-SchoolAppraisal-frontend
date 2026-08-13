@@ -894,7 +894,10 @@ function auditorAssignmentBelongsToSubmission(assignment = {}, submission = {}) 
   if (!submissionAuditType) return true;
 
   if (submissionAuditType === "administrative") {
-    return assignment.auditCategory !== "academic" && Boolean(canonicalAdministrativePost(assignment.post));
+    if (assignment.auditCategory === "academic" || !canonicalAdministrativePost(assignment.post)) return false;
+    const submissionAuditorType = normalizeUserRole(submission.forwardedAuditorType || "");
+    const assignmentAuditorType = normalizeUserRole(assignment.auditorType || "");
+    return !submissionAuditorType || !assignmentAuditorType || assignmentAuditorType === submissionAuditorType;
   }
 
   if (assignment.auditCategory) return assignment.auditCategory === submissionAuditType;
@@ -4078,9 +4081,6 @@ function SubmissionCard({
   const submitterInitials = submission.submittedBy && submission.submittedBy !== "-"
     ? initialsFor(submission.submittedBy)
     : initialsFor(submission.school);
-  const unassignedAdministrativePostLabels = submission.auditType === "administrative"
-    ? administrativeUnassignedPostsFor(submission).map((post) => ADMINISTRATIVE_POSTS.find((option) => option.value === post)?.label || post)
-    : [];
   return (
     <article className="app-surface-card review-submission-card" style={styles.submissionCard}>
       <div style={styles.submissionTop}>
@@ -4120,11 +4120,6 @@ function SubmissionCard({
               ? `${forwardedAuditorCount} matching auditor${forwardedAuditorCount === 1 ? "" : "s"}`
               : submission.forwardedToAuditorEmail}
           </small>
-          {unassignedAdministrativePostLabels.length > 0 && (
-            <small style={styles.forwardedGapWarning}>
-              {unassignedAdministrativePostLabels.length} post{unassignedAdministrativePostLabels.length === 1 ? "" : "s"} still need forwarding: {unassignedAdministrativePostLabels.join(", ")}
-            </small>
-          )}
         </div>
       )}
 
@@ -5348,9 +5343,11 @@ function AuditorProgressPanel({ submission, compact = false }) {
   const visibleAssignments = (submission.auditorAssignments || []).filter((assignment) =>
     auditorAssignmentBelongsToSubmission(assignment, submission)
   );
-  const progress = visibleAssignments.length || submission.auditorAssignments?.length
-    ? buildAuditorProgress(visibleAssignments)
-    : submission.auditorProgress || {};
+  // submission.auditorProgress is pre-scoped to this submission's own cycle by normalizeSubmission
+  // (see the comment there); prefer it over recomputing from the merged auditorAssignments feed,
+  // which can include a prior cycle's already-completed rows.
+  const backendProgress = submission.auditorProgress || {};
+  const progress = backendProgress.total ? backendProgress : buildAuditorProgress(visibleAssignments);
   if (!progress.total) return null;
 
   const percentage = Math.round((progress.submitted / progress.total) * 100);
