@@ -116,6 +116,8 @@ const statusLabels = {
   submitted: "Submitted",
   "under-review": "Under Review",
   "auditor-completed": "Auditor Completed",
+  "external_auditor_completed": "Auditor Completed",
+  "external-auditor-completed": "Auditor Completed",
   approved: "Approved",
 };
 
@@ -123,6 +125,8 @@ const statusStyles = {
   submitted: { color: "#1d4ed8", background: "#dbeafe", border: "#bfdbfe" },
   "under-review": { color: "#92400e", background: "#fef3c7", border: "#fde68a" },
   "auditor-completed": { color: "#0f766e", background: "#ccfbf1", border: "#99f6e4" },
+  "external_auditor_completed": { color: "#0f766e", background: "#ccfbf1", border: "#99f6e4" },
+  "external-auditor-completed": { color: "#0f766e", background: "#ccfbf1", border: "#99f6e4" },
   approved: { color: "#166534", background: "#dcfce7", border: "#bbf7d0" },
 };
 
@@ -415,7 +419,7 @@ const isAuditorCompleted = (submission = {}) => {
   const freshSuccessor = isFreshCycleSuccessor(submission);
   const ownSignOffDate = getAuditorSignOff(submission.values).date;
 
-  if (["auditor-completed", "approved"].includes(submission.status)) {
+  if (["auditor-completed", "external_auditor_completed", "external-auditor-completed", "approved"].includes(submission.status)) {
     return freshSuccessor ? Boolean(ownSignOffDate) : true;
   }
 
