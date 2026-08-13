@@ -15,6 +15,11 @@ function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
 
+function minZoomForImage(imageSize) {
+  if (!imageSize.width || !imageSize.height) return 1;
+  return Math.min(imageSize.width, imageSize.height) / Math.max(imageSize.width, imageSize.height);
+}
+
 function avatarImageLayout(imageSize, zoom, viewportSize = AVATAR_EDITOR_SIZE) {
   if (!imageSize.width || !imageSize.height) {
     return { width: viewportSize, height: viewportSize, maxOffsetX: 0, maxOffsetY: 0 };
@@ -265,7 +270,8 @@ export default function UserProfileModal({ profile, onClose, onSaved }) {
 
   const setAvatarZoom = (zoom) => {
     setAvatarCrop((current) => {
-      const nextZoom = clamp(Number(zoom) || 1, 1, 3);
+      const zoomMin = minZoomForImage(avatarImageSize);
+      const nextZoom = clamp(Number(zoom) || zoomMin, zoomMin, 3);
       const layout = avatarImageLayout(avatarImageSize, nextZoom);
       return {
         zoom: nextZoom,
@@ -338,10 +344,14 @@ export default function UserProfileModal({ profile, onClose, onSaved }) {
                   src={avatarPreview}
                   alt=""
                   draggable="false"
-                  onLoad={(event) => setAvatarImageSize({
-                    width: event.currentTarget.naturalWidth,
-                    height: event.currentTarget.naturalHeight,
-                  })}
+                  onLoad={(event) => {
+                    const size = {
+                      width: event.currentTarget.naturalWidth,
+                      height: event.currentTarget.naturalHeight,
+                    };
+                    setAvatarImageSize(size);
+                    setAvatarCrop({ zoom: minZoomForImage(size), x: 0, y: 0 });
+                  }}
                   style={{
                     ...styles.avatarCropImage,
                     width: avatarImageLayout(avatarImageSize, avatarCrop.zoom).width,
@@ -358,7 +368,7 @@ export default function UserProfileModal({ profile, onClose, onSaved }) {
                     <button type="button" style={styles.zoomButton} onClick={() => setAvatarZoom(avatarCrop.zoom - AVATAR_ZOOM_STEP)} aria-label="Zoom out">-</button>
                     <input
                       type="range"
-                      min="1"
+                      min={minZoomForImage(avatarImageSize)}
                       max="3"
                       step="0.01"
                       value={avatarCrop.zoom}
@@ -372,7 +382,7 @@ export default function UserProfileModal({ profile, onClose, onSaved }) {
                   <button type="button" style={styles.secondaryPhotoButton} onClick={() => fileInputRef.current?.click()}>
                     Replace
                   </button>
-                  <button type="button" style={styles.secondaryPhotoButton} onClick={() => setAvatarCrop({ zoom: 1, x: 0, y: 0 })}>
+                  <button type="button" style={styles.secondaryPhotoButton} onClick={() => setAvatarCrop({ zoom: minZoomForImage(avatarImageSize), x: 0, y: 0 })}>
                     Reset
                   </button>
                 </div>
