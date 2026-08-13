@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { getApiErrorMessage } from "../../../api/client";
 import { createUser, deleteUser, fetchUsers, updateUser } from "../../../api/users";
+import { getAttachmentUrl } from "../../../utils/attachment";
 import { formatDateDDMMYYYY } from "../../../utils/dateFormat";
 import { LoadingState } from "../components/LoadingState";
 import {
@@ -1010,7 +1011,7 @@ function UserAvatarButton({ user, onClick }) {
       aria-label={`View ${user.name}'s profile picture`}
     >
       {showImage ? (
-        <img src={user.avatarUrl} alt="" style={styles.tableAvatarImg} onError={() => setImgError(true)} />
+        <img src={getAttachmentUrl(user.avatarUrl)} alt="" style={styles.tableAvatarImg} onError={() => setImgError(true)} />
       ) : (
         user.name?.charAt(0)?.toUpperCase() || "U"
       )}
@@ -1029,7 +1030,7 @@ function AvatarPreviewCard({ user, onClose }) {
     <div style={styles.avatarPreviewOverlay} onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="avatar-preview-name">
       <div style={styles.avatarPreviewCard} onClick={(event) => event.stopPropagation()}>
         {showImage ? (
-          <img src={user.avatarUrl} alt="" style={styles.avatarPreviewImg} onError={() => setImgError(true)} />
+          <img src={getAttachmentUrl(user.avatarUrl)} alt="" style={styles.avatarPreviewImg} onError={() => setImgError(true)} />
         ) : (
           <div style={styles.avatarPreviewFallback}>{user.name?.charAt(0)?.toUpperCase() || "U"}</div>
         )}

@@ -1499,12 +1499,15 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
   );
   const resolveSubmitterAvatar = (submission) => {
     if (!submission) return "";
+    let rawUrl = "";
     if (submission.auditType === "administrative") {
       const postCode = canonicalAdministrativePost(submission.post || submission.department || submission.school);
-      return adminUsersByPostForAvatars[postCode]?.avatarUrl || "";
+      rawUrl = adminUsersByPostForAvatars[postCode]?.avatarUrl || "";
+    } else {
+      const code = canonicalSchoolCode(submission.school) || String(submission.school || "").trim().toUpperCase();
+      rawUrl = directorsBySchoolForAvatars[code]?.avatarUrl || "";
     }
-    const code = canonicalSchoolCode(submission.school) || String(submission.school || "").trim().toUpperCase();
-    return directorsBySchoolForAvatars[code]?.avatarUrl || "";
+    return getAttachmentUrl(rawUrl);
   };
   const navigationItems = useMemo(() => {
     if (isAuditor) {

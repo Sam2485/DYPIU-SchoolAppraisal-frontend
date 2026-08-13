@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { getAttachmentUrl } from "../../../utils/attachment";
 import { scrollPageToTop } from "../../../utils/scrollToTop";
 
 const Icon = ({ children, size = 18 }) => (
@@ -261,7 +262,7 @@ export default function AppSidebar({
       >
         <div className="app-sidebar__avatar">
           {profile.avatarUrl ? (
-            <img className="app-sidebar__avatar-img" src={profile.avatarUrl} alt="" />
+            <img className="app-sidebar__avatar-img" src={getAttachmentUrl(profile.avatarUrl)} alt="" />
           ) : (
             initialsFor(profile.name) || badge
           )}

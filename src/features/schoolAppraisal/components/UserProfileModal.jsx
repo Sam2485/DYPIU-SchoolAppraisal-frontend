@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getApiErrorMessage } from "../../../api/client";
 import { changeCurrentUserPassword, fetchCurrentUser, updateCurrentUser, uploadCurrentUserAvatar } from "../../../api/users";
+import { getAttachmentUrl } from "../../../utils/attachment";
 
 const AVATAR_EDITOR_SIZE = 220;
 const AVATAR_OUTPUT_SIZE = 512;
@@ -381,7 +382,7 @@ export default function UserProfileModal({ profile, onClose, onSaved }) {
             <>
               <div style={styles.profileModalAvatar}>
                 {avatarPreview ? (
-                  <img src={avatarPreview} alt="" style={styles.profileModalAvatarImg} />
+                  <img src={getAttachmentUrl(avatarPreview)} alt="" style={styles.profileModalAvatarImg} />
                 ) : (
                   <span>{initialsFromName(name) || "?"}</span>
                 )}
