@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { getApiErrorMessage } from "../../../api/client";
 import { buildSubmissionPayload, deleteAttachment, fetchMyDraft, fetchSubmissionSnapshots, normalizeDraft, saveDraft, signOffProfileFromSession, submitDraft, uploadAttachments, withSubmitterSignOff } from "../../../api/submissions";
 import universityLogo from "../../../assets/images/image.png";
@@ -11,6 +11,15 @@ import { emptySubmissionConfirmation, isSubmissionConfirmed } from "./submission
 import { columnsWithSerial, serialColumnFor } from "./tableHelpers";
 import { scrollPageToTop } from "../../../utils/scrollToTop";
 import { academicAudit2025Schema } from "../formSchemas";
+import { SCHOOL_OPTIONS, canonicalSchoolCode } from "../userManagement/userManagementConfig";
+
+const DEFAULT_SCHOOL_ADDRESS = "Dr. D. Y. Patil International University, Sector 29, Pradhikaran, Akurdi, Pune - Maharashtra, INDIA 411044";
+
+const schoolFullNameFromCode = (code = "") => {
+  const canonical = canonicalSchoolCode(code) || String(code || "").trim().toUpperCase();
+  const school = SCHOOL_OPTIONS.find((option) => option.code.toUpperCase() === canonical);
+  return school?.name || code || "";
+};
 
 const emptyRowFor = (columns) =>
   columnsWithSerial(columns).reduce((row, column) => {
@@ -271,7 +280,18 @@ export default function AuditForm({
   onSectionChange,
 }) {
   const auditType = schema.id.includes("administrative") ? "administrative" : "academic";
-  const initialValues = useMemo(() => buildInitialValues(schema), [schema]);
+  const defaultSchoolName = useMemo(() => schoolFullNameFromCode(sessionStorage.getItem("school") || ""), []);
+  const initialValues = useMemo(() => {
+    const values = buildInitialValues(schema);
+    if ("schoolName" in values) values.schoolName = defaultSchoolName;
+    if ("address" in values) values.address = DEFAULT_SCHOOL_ADDRESS;
+    return values;
+  }, [schema, defaultSchoolName]);
+  const withSchoolDefaults = useCallback((fieldValues = {}) => ({
+    ...fieldValues,
+    ...("schoolName" in initialValues && !fieldValues.schoolName ? { schoolName: defaultSchoolName } : {}),
+    ...("address" in initialValues && !fieldValues.address ? { address: DEFAULT_SCHOOL_ADDRESS } : {}),
+  }), [initialValues, defaultSchoolName]);
   const initialTables = useMemo(() => buildInitialTables(schema), [schema]);
   const [values, setValues] = useState(initialValues);
   const [tables, setTables] = useState(initialTables);
@@ -338,7 +358,7 @@ export default function AuditForm({
         }
 
         if (!isActive) return;
-        setValues(activeDraft.values);
+        setValues(withSchoolDefaults(activeDraft.values));
         setTables(activeDraft.tables);
         setAttachments(activeDraft.attachments);
         setHasExistingSubmission(activeDraft.exists);
@@ -356,7 +376,7 @@ export default function AuditForm({
     return () => {
       isActive = false;
     };
-  }, [academicYear, auditType, initialTables, initialValues]);
+  }, [academicYear, auditType, initialTables, initialValues, withSchoolDefaults]);
 
   const handleFieldChange = (fieldId, value) => {
     setValues((current) => ({ ...current, [fieldId]: value }));
