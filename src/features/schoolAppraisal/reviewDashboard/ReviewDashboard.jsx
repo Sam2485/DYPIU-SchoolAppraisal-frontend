@@ -2957,25 +2957,21 @@ function auditorAccountCoverage(users = [], auditorType, academicSubmissions = [
         });
       });
 
-      let assignedPostCodes = [];
-      if (myAssignments.length > 0) {
-        assignedPostCodes = Array.from(
+      const assignedPostCodes = myAssignments.length > 0
+        ? Array.from(
           new Set(
             myAssignments
               .map((a) => canonicalAdministrativePost(a.post) || a.post)
               .filter(Boolean)
           )
-        );
-      } else {
-        const rawPosts = auditor.administrativePosts || (auditor.post ? [auditor.post] : []);
-        assignedPostCodes = Array.from(
+        )
+        : Array.from(
           new Set(
-            rawPosts
+            (auditor.administrativePosts || (auditor.post ? [auditor.post] : []))
               .map((p) => canonicalAdministrativePost(p) || p)
               .filter(Boolean)
           )
         );
-      }
 
       if (!assignedPostCodes.length) return;
 
@@ -3149,8 +3145,14 @@ function auditorTypeCoverageWithRows(submissions = [], auditorType, resolveConta
     // director's own submit action (values.__auditSignOff.submittedBy.date, set only by
     // withSubmitterSignOff at genuine submit time).
     const isDraft = normalizeStatus(submission.status) === "draft" || !getSubmitterSignOff(submission.values).date;
+    // Not-submitted rows haven't actually been signed this cycle, so any submittedBy on the
+    // record is leftover from a cloned prior cycle (see comment above) — show the CURRENT
+    // director instead of that stale name. Submitted rows keep the frozen submittedBy: it's
+    // the historical record of who actually signed that cycle's form, which should stay
+    // correct even if the school's director has since changed (e.g. last year's report was
+    // signed by the outgoing director, not whoever holds the role now).
     const row = {
-      name: submission.submittedBy || contact.name || "-",
+      name: (isDraft ? contact.name : submission.submittedBy) || contact.name || "-",
       email: contact.email || "-",
       secondary: contact.secondary || "-",
       date: isDraft ? null : submission.submittedOn,
