@@ -12,6 +12,9 @@ const isDateColumn = (column, table = {}) =>
   table.dateColumns?.includes(column) || /^\s*date\s*$/i.test(column);
 const isUrlColumn = (column, table = {}) => table.urlColumns?.includes(column);
 const isNumberColumn = (column, table = {}) => table.numberColumns?.includes(column);
+const isTextareaColumn = (column, table = {}) => table.textareaColumns?.includes(column);
+const textareaMaxLengthFor = (column, table = {}) => table.textareaMaxLengths?.[column] || 500;
+const placeholderFor = (column, table = {}) => table.placeholders?.[column] || "";
 const selectOptionsFor = (column, table = {}) => table.selectOptions?.[column] || null;
 const normalizeColumnName = (value = "") =>
   String(value)
@@ -443,6 +446,27 @@ export default function AuditTable({
                           <option key={option} value={option}>{option}</option>
                         ))}
                       </select>
+                    ) : isTextareaColumn(column, table) ? (
+                      <textarea
+                        className="audit-table-input"
+                        ref={(el) => {
+                          if (!el) return;
+                          el.style.height = "auto";
+                          el.style.height = `${el.scrollHeight}px`;
+                        }}
+                        value={row[column] ?? ""}
+                        onChange={(event) => handleCellChange(rowIndex, column, event.target.value)}
+                        maxLength={textareaMaxLengthFor(column, table)}
+                        placeholder={placeholderFor(column, table)}
+                        rows={1}
+                        style={{
+                          ...styles.cellInput,
+                          ...styles.textarea,
+                          ...(fitToContainer ? styles.fittedCellInput : {}),
+                        }}
+                        readOnly={readOnly}
+                        aria-label={`${table.title} ${column}`}
+                      />
                     ) : (
                       <input className="audit-table-input"
                         type={isUrlColumn(column, table) ? "url" : isNumberColumn(column, table) ? "number" : "text"}
@@ -615,6 +639,14 @@ const styles = {
   },
   fittedCellInput: {
     minWidth: 0,
+  },
+  textarea: {
+    lineHeight: 1.45,
+    fontFamily: "inherit",
+    whiteSpace: "pre-wrap",
+    overflowWrap: "break-word",
+    resize: "none",
+    overflow: "hidden",
   },
   serialInput: {
     minWidth: 44,
