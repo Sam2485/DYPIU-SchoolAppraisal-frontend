@@ -15,3 +15,9 @@ export const requestPasswordReset = (email) =>
 export const resetPassword = (token, newPassword) =>
   apiClient.post("/api/auth/reset-password", { token, newPassword });
 
+export const refreshToken = (refreshToken) =>
+  apiClient.post("/api/auth/refresh", { refreshToken });
+
+export const logout = (refreshToken) =>
+  apiClient.post("/api/auth/logout", { refreshToken });
+

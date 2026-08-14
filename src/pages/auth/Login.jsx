@@ -51,6 +51,9 @@ export default function Login() {
 
   const storeSessionAndNavigate = async (profile, email) => {
     sessionStorage.setItem("token", profile.token);
+    if (profile.refreshToken) {
+      sessionStorage.setItem("refreshToken", profile.refreshToken);
+    }
     sessionStorage.setItem("userId", profile.id);
     sessionStorage.setItem("email", profile.email || email);
     sessionStorage.setItem("username", profile.email || email);
