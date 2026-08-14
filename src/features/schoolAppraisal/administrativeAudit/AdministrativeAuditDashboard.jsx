@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { getApiErrorMessage } from "../../../api/client";
+import { clearAuthState, getApiErrorMessage } from "../../../api/client";
 import { SIGN_OFF_FIELD, buildSubmissionPayload, deleteAttachment, fetchMyDraft, normalizeDraft, saveDraft, uploadAttachments, fetchAdministrativeStatus, submitAdministrativePart, fetchCurrentAuditCycle } from "../../../api/submissions";
 import { fetchCurrentUser } from "../../../api/users";
 import universityLogo from "../../../assets/images/image.png";
@@ -582,7 +582,7 @@ export default function AdministrativeAuditDashboard() {
   };
 
   const handleLogout = () => {
-    sessionStorage.clear();
+    clearAuthState();
     navigate("/login", { replace: true });
   };
 

@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { getApiErrorMessage } from "../../../api/client";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { clearAuthState, getApiErrorMessage } from "../../../api/client";
 import {
   SIGN_OFF_FIELD,
   buildSubmissionPayload,
@@ -83,6 +83,18 @@ const BACKUP_RESTORE_NAV_ITEM = {
   caption: "Database & Uploads backup",
   group: "system-admin",
   groupLabel: "System Administration",
+};
+const REVIEW_ROUTE_VIEW_IDS = new Set([
+  ...REVIEW_NAV_ITEMS.map((item) => item.id),
+  AUDITOR_FINAL_REVIEW_NAV_ITEM.id,
+  PREVIOUS_REPORTS_NAV_ITEM.id,
+  USER_MANAGEMENT_NAV_ITEM.id,
+  BACKUP_RESTORE_NAV_ITEM.id,
+]);
+
+const routeViewFor = (value, fallback) => {
+  const normalized = String(value || "").trim();
+  return REVIEW_ROUTE_VIEW_IDS.has(normalized) ? normalized : fallback;
 };
 
 const REVIEW_ROLE_CONFIG = {
@@ -1383,11 +1395,15 @@ const normalizeHistoryEntry = (entry = {}, index = 0) => {
 
 export default function ReviewDashboard({ dashboardKind = "review" }) {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const role = String(sessionStorage.getItem("role") || "iqac").toLowerCase().replaceAll("_", "-");
   const isAuditor = dashboardKind === "auditor" || isAuditorRole(role);
   const isIqacDashboard = role === "iqac" && !isAuditor;
   const initialAuditorCategory = sessionStorage.getItem("category") || auditCategoryFromRole(role) || "academic";
-  const [activeView, setActiveView] = useState(isAuditor ? initialAuditorCategory : "overview");
+  const defaultActiveView = isAuditor ? initialAuditorCategory : "overview";
+  const routeActiveView = routeViewFor(searchParams.get("view"), defaultActiveView);
+  const routeSubmissionId = searchParams.get("submission") || "";
+  const activeView = routeActiveView;
   const [activeGroup, setActiveGroup] = useState({ academic: "all", administrative: "all" });
   const [submissions, setSubmissions] = useState({ academic: [], administrative: [] });
   const [selectedSubmission, setSelectedSubmission] = useState(null);
@@ -1417,6 +1433,23 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
   const [activeAcademicYear, setActiveAcademicYear] = useState("");
   const [availableYears, setAvailableYears] = useState(["2025-26", "2026-27"]);
   const [refreshKey, setRefreshKey] = useState(0);
+
+  const setDashboardRouteState = useCallback((viewId, { submissionId = "", replace = false } = {}) => {
+    const nextParams = new URLSearchParams(searchParams);
+    if (viewId && viewId !== defaultActiveView) {
+      nextParams.set("view", viewId);
+    } else {
+      nextParams.delete("view");
+    }
+
+    if (submissionId) {
+      nextParams.set("submission", String(submissionId));
+    } else {
+      nextParams.delete("submission");
+    }
+
+    setSearchParams(nextParams, { replace });
+  }, [defaultActiveView, searchParams, setSearchParams]);
 
   useEffect(() => {
     let isActive = true;
@@ -1499,15 +1532,13 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
   );
   const resolveSubmitterAvatar = (submission) => {
     if (!submission) return "";
-    let rawUrl = "";
     if (submission.auditType === "administrative") {
       const postCode = canonicalAdministrativePost(submission.post || submission.department || submission.school);
-      rawUrl = adminUsersByPostForAvatars[postCode]?.avatarUrl || "";
-    } else {
-      const code = canonicalSchoolCode(submission.school) || String(submission.school || "").trim().toUpperCase();
-      rawUrl = directorsBySchoolForAvatars[code]?.avatarUrl || "";
+      return getAttachmentUrl(adminUsersByPostForAvatars[postCode]?.avatarUrl || "");
     }
-    return getAttachmentUrl(rawUrl);
+
+    const code = canonicalSchoolCode(submission.school) || String(submission.school || "").trim().toUpperCase();
+    return getAttachmentUrl(directorsBySchoolForAvatars[code]?.avatarUrl || "");
   };
   const navigationItems = useMemo(() => {
     if (isAuditor) {
@@ -1687,7 +1718,11 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
     );
   };
 
-  const openSubmission = async (submission) => {
+  const openSubmission = useCallback(async (submission, { syncUrl = true } = {}) => {
+    if (syncUrl) {
+      setDashboardRouteState(submission.auditType, { submissionId: submission.id });
+    }
+
     setLoadingSubmissionId(submission.id);
     setError("");
 
@@ -1719,7 +1754,27 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
     } finally {
       setLoadingSubmissionId("");
     }
-  };
+  }, [profile, role, setDashboardRouteState]);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      if (!routeSubmissionId) {
+        setSelectedSubmission((current) => (current ? null : current));
+        return;
+      }
+      if (loadingSubmissions) return;
+      if (selectedSubmission && String(selectedSubmission.id) === routeSubmissionId) return;
+
+      const matchingSubmission = allSubmissions.find((submission) => String(submission.id) === routeSubmissionId);
+      if (matchingSubmission) {
+        openSubmission(matchingSubmission, { syncUrl: false });
+      } else {
+        setSelectedSubmission(null);
+      }
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [allSubmissions, loadingSubmissions, openSubmission, routeSubmissionId, selectedSubmission]);
 
   const approveSubmission = async (submission, reportCategory) => {
     setReviewingStatus("approved");
@@ -1806,7 +1861,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
       setApprovalTarget(null);
       setApprovalCategory("");
       setSelectedSubmission(null);
-      setActiveView("previous-reports");
+      setDashboardRouteState("previous-reports");
     } catch (reviewError) {
       setError(getApiErrorMessage(reviewError, "Could not update review status."));
     } finally {
@@ -2002,7 +2057,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
         nextVersion: Number(submission.version || 1) + 1,
       });
       updateSubmission(submission.auditType, submission.id, { hasNextCycle: true });
-      setActiveView(submission.auditType);
+      setDashboardRouteState(submission.auditType);
       setRefreshKey((current) => current + 1);
     } catch (cycleError) {
       const message = getApiErrorMessage(cycleError, "Could not start the next audit cycle.");
@@ -2069,7 +2124,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
       setAcademicYear(confirmedYear);
       setShowNextYearModal(false);
       setSelectedSubmission(null);
-      setActiveView("overview");
+      setDashboardRouteState(defaultActiveView);
       setRefreshKey((current) => current + 1);
     } catch (cycleError) {
       setError(getApiErrorMessage(cycleError, "Could not start the next academic year."));
@@ -2079,7 +2134,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
   };
 
   const handleLogout = () => {
-    sessionStorage.clear();
+    clearAuthState();
     navigate("/login", { replace: true });
   };
 
@@ -2396,7 +2451,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
             }
             if (viewId === "user-management" && !canManageUsers) return;
             setSelectedSubmission(null);
-            setActiveView(viewId);
+            setDashboardRouteState(viewId);
           }}
           profile={profile}
           onLogout={() => setShowLogoutModal(true)}
@@ -2424,7 +2479,10 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
             <FullFormReview
               key={`${selectedSubmission.id}-${profile.id || profile.email || profile.auditorRole || role}`}
               submission={selectedSubmission}
-              onBack={() => setSelectedSubmission(null)}
+              onBack={() => {
+                setSelectedSubmission(null);
+                setDashboardRouteState(activeView, { replace: true });
+              }}
               onRemarksChange={(remarks) => updateSubmission(selectedSubmission.auditType, selectedSubmission.id, { remarks })}
               onApprove={() => openApprovalModal(selectedSubmission)}
               onReturnToAuditor={() => openCorrectionModal(selectedSubmission)}
@@ -2470,7 +2528,6 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
               submissions={allSubmissions}
               loading={loadingSubmissions}
               onOpen={(submission) => {
-                setActiveView(submission.auditType);
                 openSubmission(submission);
               }}
             />
