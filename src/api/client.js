@@ -9,7 +9,9 @@ const apiClient = axios.create({
 });
 
 const setSessionValue = (key, value) => {
-  sessionStorage.setItem(key, value == null ? "" : String(value));
+  const strVal = value == null ? "" : String(value);
+  sessionStorage.setItem(key, strVal);
+  localStorage.setItem(key, strVal);
 };
 
 const normalizeRoleValue = (value = "") => String(value).trim().toLowerCase().replaceAll("_", "-");
@@ -76,10 +78,9 @@ const storeUserProfile = (profile = {}) => {
 };
 
 const storeTokenSession = (accessToken, refreshToken) => {
-  sessionStorage.setItem("token", accessToken);
+  setSessionValue("token", accessToken);
   if (refreshToken) {
-    sessionStorage.setItem("refreshToken", refreshToken);
-    localStorage.setItem("refreshToken", refreshToken);
+    setSessionValue("refreshToken", refreshToken);
   }
   apiClient.defaults.headers.common.Authorization = `Bearer ${accessToken}`;
 
@@ -98,7 +99,7 @@ const storeTokenSession = (accessToken, refreshToken) => {
 
 export const clearAuthState = () => {
   sessionStorage.clear();
-  localStorage.removeItem("refreshToken");
+  localStorage.clear();
   delete apiClient.defaults.headers.common.Authorization;
 };
 
@@ -109,7 +110,7 @@ const redirectToLogin = () => {
 };
 
 apiClient.interceptors.request.use((config) => {
-  const token = sessionStorage.getItem("token");
+  const token = sessionStorage.getItem("token") || localStorage.getItem("token");
   if (token) {
     config.headers = config.headers || {};
     config.headers.Authorization = `Bearer ${token}`;
@@ -146,12 +147,27 @@ const refreshAccessToken = async (storedRefreshToken) => {
 };
 
 export const restoreAuthSession = async () => {
-  const sessionToken = sessionStorage.getItem("token");
-  if (sessionToken && sessionStorage.getItem("role") && !isJwtExpired(sessionToken)) {
+  const authKeys = [
+    "token", "refreshToken", "userId", "email", "username", "name",
+    "designation", "school", "post", "administrativePosts",
+    "accountType", "category", "auditorType", "auditorRole", "role", "academicYear"
+  ];
+  authKeys.forEach((key) => {
+    const val = localStorage.getItem(key);
+    if (val && !sessionStorage.getItem(key)) {
+      sessionStorage.setItem(key, val);
+    }
+  });
+
+  const sessionToken = sessionStorage.getItem("token") || localStorage.getItem("token");
+  const sessionRole = sessionStorage.getItem("role") || localStorage.getItem("role");
+
+  if (sessionToken && sessionRole && !isJwtExpired(sessionToken)) {
+    apiClient.defaults.headers.common.Authorization = `Bearer ${sessionToken}`;
     return true;
   }
 
-  const storedRefreshToken = localStorage.getItem("refreshToken");
+  const storedRefreshToken = localStorage.getItem("refreshToken") || sessionStorage.getItem("refreshToken");
   if (!storedRefreshToken) return false;
 
   try {

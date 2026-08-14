@@ -57,34 +57,39 @@ export default function Login() {
       authPayload.user?.refreshToken ||
       "";
 
-    sessionStorage.setItem("token", profile.token);
+    const setItem = (key, val) => {
+      const str = val == null ? "" : String(val);
+      sessionStorage.setItem(key, str);
+      localStorage.setItem(key, str);
+    };
+
+    setItem("token", profile.token);
     if (refreshToken) {
-      sessionStorage.setItem("refreshToken", refreshToken);
-      localStorage.setItem("refreshToken", refreshToken);
+      setItem("refreshToken", refreshToken);
     }
-    sessionStorage.setItem("userId", profile.id);
-    sessionStorage.setItem("email", profile.email || email);
-    sessionStorage.setItem("username", profile.email || email);
-    sessionStorage.setItem("name", profile.name);
-    sessionStorage.setItem("designation", profile.designation);
-    sessionStorage.setItem("school", profile.school);
-    sessionStorage.setItem("post", profile.post);
-    sessionStorage.setItem("administrativePosts", JSON.stringify(profile.administrativePosts || []));
-    sessionStorage.setItem("accountType", profile.accountType);
-    sessionStorage.setItem("category", profile.category);
-    sessionStorage.setItem("auditorType", profile.auditorType);
-    sessionStorage.setItem("auditorRole", profile.auditorRole);
-    sessionStorage.setItem("role", profile.role);
+    setItem("userId", profile.id);
+    setItem("email", profile.email || email);
+    setItem("username", profile.email || email);
+    setItem("name", profile.name);
+    setItem("designation", profile.designation);
+    setItem("school", profile.school);
+    setItem("post", profile.post);
+    setItem("administrativePosts", JSON.stringify(profile.administrativePosts || []));
+    setItem("accountType", profile.accountType);
+    setItem("category", profile.category);
+    setItem("auditorType", profile.auditorType);
+    setItem("auditorRole", profile.auditorRole);
+    setItem("role", profile.role);
     try {
       const { data } = await fetchCurrentAuditCycle();
       const activeYear = data?.activeYear || data?.academicYear;
       if (activeYear) {
-        sessionStorage.setItem("academicYear", activeYear);
+        setItem("academicYear", activeYear);
       } else if (profile.academicYear) {
-        sessionStorage.setItem("academicYear", profile.academicYear);
+        setItem("academicYear", profile.academicYear);
       }
     } catch {
-      if (profile.academicYear) sessionStorage.setItem("academicYear", profile.academicYear);
+      if (profile.academicYear) setItem("academicYear", profile.academicYear);
     }
     navigate(dashboardForRole(profile.role), { replace: true });
   };

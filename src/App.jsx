@@ -10,7 +10,7 @@ import { dashboardForRole } from "./api/submissions";
 import { restoreAuthSession } from "./api/client";
 
 function ProtectedRoute({ role, children }) {
-  const activeRole = sessionStorage.getItem("role");
+  const activeRole = sessionStorage.getItem("role") || localStorage.getItem("role");
   const allowedRoles = Array.isArray(role) ? role : [role];
   const hasAccess = allowedRoles.some((allowedRole) =>
     allowedRole === activeRole || (allowedRole === "auditor" && String(activeRole || "").includes("auditor"))
@@ -29,8 +29,8 @@ function AuthenticatedHistoryBoundary() {
   const navigationType = useNavigationType();
   const boundaryPushInFlight = useRef(false);
   const boundaryArmed = useRef(false);
-  const activeToken = sessionStorage.getItem("token");
-  const activeRole = sessionStorage.getItem("role");
+  const activeToken = sessionStorage.getItem("token") || localStorage.getItem("token");
+  const activeRole = sessionStorage.getItem("role") || localStorage.getItem("role");
   const dashboardPath = dashboardForRole(activeRole);
   const isAuthenticated = Boolean(activeToken && activeRole && dashboardPath !== "/login");
   const isDashboardBoundary = isAuthenticated && location.pathname === dashboardPath && !location.search;
