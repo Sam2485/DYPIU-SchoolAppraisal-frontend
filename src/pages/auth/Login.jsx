@@ -49,10 +49,18 @@ export default function Login() {
     return `${m}:${s < 10 ? "0" : ""}${s}`;
   };
 
-  const storeSessionAndNavigate = async (profile, email) => {
+  const storeSessionAndNavigate = async (profile, email, authPayload = {}) => {
+    const refreshToken =
+      profile.refreshToken ||
+      authPayload.refreshToken ||
+      authPayload.data?.refreshToken ||
+      authPayload.user?.refreshToken ||
+      "";
+
     sessionStorage.setItem("token", profile.token);
-    if (profile.refreshToken) {
-      sessionStorage.setItem("refreshToken", profile.refreshToken);
+    if (refreshToken) {
+      sessionStorage.setItem("refreshToken", refreshToken);
+      localStorage.setItem("refreshToken", refreshToken);
     }
     sessionStorage.setItem("userId", profile.id);
     sessionStorage.setItem("email", profile.email || email);
@@ -123,7 +131,7 @@ export default function Login() {
         throw new Error("Login response is missing token or role.");
       }
 
-      storeSessionAndNavigate(profile, email);
+      storeSessionAndNavigate(profile, email, data);
     } catch (loginError) {
       setError(getApiErrorMessage(loginError, "Invalid email address or password."));
     } finally {
@@ -150,7 +158,7 @@ export default function Login() {
         throw new Error("Verification response is missing token or role.");
       }
 
-      storeSessionAndNavigate(profile, username);
+      storeSessionAndNavigate(profile, username, data);
     } catch (verifyError) {
       setError(getApiErrorMessage(verifyError, "Invalid verification code."));
     } finally {

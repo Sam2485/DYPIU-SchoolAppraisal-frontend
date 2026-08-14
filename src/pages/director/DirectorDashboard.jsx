@@ -7,6 +7,7 @@ import { academicAudit2025Schema } from "../../features/schoolAppraisal/formSche
 import { scrollPageToTop } from "../../utils/scrollToTop";
 import { fetchCurrentAuditCycle } from "../../api/submissions";
 import { fetchCurrentUser } from "../../api/users";
+import { clearAuthState } from "../../api/client";
 
 const directorAuditSchema = academicAudit2025Schema;
 const compactYear = (str = "") => {
@@ -89,7 +90,7 @@ export default function DirectorDashboard() {
   };
 
   const handleLogout = () => {
-    sessionStorage.clear();
+    clearAuthState();
     navigate("/login", { replace: true });
   };
 

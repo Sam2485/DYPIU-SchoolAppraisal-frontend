@@ -177,6 +177,7 @@ export const dashboardForRole = (role) => {
 export const normalizeUserProfile = (payload = {}) => {
   const user = payload.user || payload.profile || payload.data?.user || payload.data || payload;
   const token = payload.token || payload.jwt || payload.accessToken || payload.data?.token || payload.data?.jwt || "";
+  const refreshToken = payload.refreshToken || payload.data?.refreshToken || user.refreshToken || "";
   const rawRole = normalizeRole(user.role || payload.role || "");
   const accountType = normalizeRole(user.accountType || user.userType || user.type || payload.accountType || (rawRole.includes("auditor") ? "auditor" : ""));
   const category = normalizeRole(user.category || user.auditCategory || payload.category || payload.auditCategory || (
@@ -193,6 +194,7 @@ export const normalizeUserProfile = (payload = {}) => {
 
   return {
     token,
+    refreshToken,
     id: user.id || user.userId || payload.id || payload.userId || "",
     email: user.email || user.username || payload.email || payload.username || "",
     name: user.name || user.fullName || payload.name || "",
