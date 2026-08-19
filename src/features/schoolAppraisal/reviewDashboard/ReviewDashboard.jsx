@@ -61,8 +61,7 @@ const AUDITOR_FINAL_REVIEW_NAV_ITEM = {
 };
 const PREVIOUS_REPORTS_NAV_ITEM = {
   id: "previous-reports",
-  title: "Previous Reports",
-  caption: "Approved report history",
+  title: "Reports",
   group: "final-verification",
   groupLabel: "Final Verification",
 };
@@ -182,6 +181,8 @@ const academicYearPeriod = (value) => {
   const [startYear, endYear] = normalizeAcademicYear(value).split("-");
   return `July, ${startYear} - June, ${endYear}`;
 };
+const academicYearOptionLabel = (year, activeYear) =>
+  compactAcademicYear(year) === compactAcademicYear(activeYear) ? `${year} (active)` : year;
 const hasAuditorAssignment = (submission = {}) => Boolean(
   submission.forwardedAt ||
   submission.forwardedToAuditorId ||
@@ -1399,8 +1400,13 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
   const role = String(sessionStorage.getItem("role") || "iqac").toLowerCase().replaceAll("_", "-");
   const isAuditor = dashboardKind === "auditor" || isAuditorRole(role);
   const isIqacDashboard = role === "iqac" && !isAuditor;
+  const isViceChancellorDashboard = role === "vice-chancellor";
   const initialAuditorCategory = sessionStorage.getItem("category") || auditCategoryFromRole(role) || "academic";
-  const defaultActiveView = isAuditor ? initialAuditorCategory : "overview";
+  const defaultActiveView = isAuditor
+    ? initialAuditorCategory
+    : isViceChancellorDashboard
+      ? PREVIOUS_REPORTS_NAV_ITEM.id
+      : "overview";
   const routeActiveView = routeViewFor(searchParams.get("view"), defaultActiveView);
   const routeSubmissionId = searchParams.get("submission") || "";
   const activeView = routeActiveView;
@@ -1464,7 +1470,9 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
         setAvailableYears(formattedYears);
 
         const stored = sessionStorage.getItem("academicYear");
-        const selected = isIqacDashboard || !stored ? compactAcademicYear(activeLabel) : compactAcademicYear(stored);
+        const selected = isIqacDashboard || isViceChancellorDashboard || !stored
+          ? compactAcademicYear(activeLabel)
+          : compactAcademicYear(stored);
         setAcademicYear(normalizeAcademicYear(selected));
         sessionStorage.setItem("academicYear", selected);
       } catch {
@@ -1475,7 +1483,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
     return () => {
       isActive = false;
     };
-  }, [isIqacDashboard, refreshKey]);
+  }, [isIqacDashboard, isViceChancellorDashboard, refreshKey]);
 
   const [showNextYearModal, setShowNextYearModal] = useState(false);
   const [startingAcademicYear, setStartingAcademicYear] = useState(false);
@@ -1549,18 +1557,23 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
       return auditItems;
     }
 
+    if (isViceChancellorDashboard) {
+      return [];
+    }
+
     if (isIqacDashboard) {
       return REVIEW_NAV_ITEMS.filter((item) => item.id !== "advanced-overview");
     }
 
     return REVIEW_NAV_ITEMS;
-  }, [isAuditor, isIqacDashboard, profile.category]);
+  }, [isAuditor, isIqacDashboard, isViceChancellorDashboard, profile.category]);
   const pinnedNavigationItems = useMemo(() => {
     if (isAuditor || !canManageUsers) return [];
     return [USER_MANAGEMENT_NAV_ITEM];
   }, [canManageUsers, isAuditor]);
   const standaloneNavigationItems = useMemo(() => {
     if (isAuditor) return [];
+    if (isViceChancellorDashboard) return [PREVIOUS_REPORTS_NAV_ITEM];
     const items = [];
     if (["iqac", "vice-chancellor"].includes(role)) {
       items.push(AUDITOR_FINAL_REVIEW_NAV_ITEM, PREVIOUS_REPORTS_NAV_ITEM, START_NEXT_YEAR_NAV_ITEM);
@@ -1569,8 +1582,12 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
       items.push(BACKUP_RESTORE_NAV_ITEM);
     }
     return items;
-  }, [isAuditor, role]);
-  const visibleActiveView = !canManageUsers && activeView === "user-management" ? "overview" : activeView;
+  }, [isAuditor, isViceChancellorDashboard, role]);
+  const visibleActiveView = isViceChancellorDashboard && activeView !== PREVIOUS_REPORTS_NAV_ITEM.id
+    ? PREVIOUS_REPORTS_NAV_ITEM.id
+    : !canManageUsers && activeView === "user-management"
+      ? "overview"
+      : activeView;
   const auditorReviewedSubmissions = useMemo(
     () => allSubmissions.filter((submission) => isAuditorCompleted(submission) && !isApprovedReport(submission)),
     [allSubmissions],
@@ -2514,13 +2531,16 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
               currentProfile={profile}
               submitterAvatarUrl={resolveSubmitterAvatar(selectedSubmission)}
             />
-          ) : visibleActiveView === "overview" && isIqacDashboard ? (
+          ) : visibleActiveView === "overview" && (isIqacDashboard || isViceChancellorDashboard) ? (
             <AcademicAdministrativeSubmissionsPanel
               academicSubmissions={submissions.academic}
               administrativeSubmissions={submissions.administrative}
               loading={loadingSubmissions}
               academicYear={academicYear}
               availableYears={availableYears}
+              title={isViceChancellorDashboard ? "Vice Chancellor Dashboard Overview" : undefined}
+              subtitle={isViceChancellorDashboard ? "Monitor academic and administrative submissions" : undefined}
+              showActionCards={!isViceChancellorDashboard}
             />
           ) : visibleActiveView === "overview" ? (
             <OverviewPanel
@@ -2677,29 +2697,9 @@ function buildMetrics(submissions) {
 function OverviewPanel({ metrics, submissions, loading, onOpen }) {
   const pendingSubmissions = submissions.filter((submission) => submission.status !== "approved");
   const approvalRate = metrics.total ? Math.round((metrics.approved / metrics.total) * 100) : 0;
-  const schoolProgress = buildSchoolProgress(submissions);
 
   return (
     <section style={styles.panel}>
-      <div className="review-overview-hero" style={styles.overviewHero}>
-        <div style={styles.overviewHeroCopy}>
-          <span style={styles.overviewEyebrow}>Review command center</span>
-          <h2 className="review-overview-title" style={styles.overviewTitle}>Institutional Audit Overview</h2>
-          <p style={styles.overviewDescription}>Track submissions, prioritize pending reviews, and monitor approval progress across every school.</p>
-          <div style={styles.overviewHeroPills}>
-            <span style={styles.overviewHeroPill}>{metrics.academic} Academic</span>
-            <span style={styles.overviewHeroPill}>{metrics.administrative} Administrative</span>
-            <span style={styles.overviewHeroPill}>{schoolProgress.length} Schools</span>
-          </div>
-        </div>
-        <div style={{ ...styles.approvalRing, background: `conic-gradient(#38bdf8 ${approvalRate}%, rgba(255,255,255,.16) 0)` }}>
-          <div style={styles.approvalRingInner}>
-            <strong>{approvalRate}%</strong>
-            <span>approved</span>
-          </div>
-        </div>
-      </div>
-
       <div style={styles.metricGrid}>
         <MetricCard label="Total submissions" value={metrics.total} hint="Across both audit types" tone="blue" />
         <MetricCard label="Pending review" value={metrics.submitted + metrics["under-review"]} hint="Requires reviewer action" tone="amber" />
@@ -3478,6 +3478,9 @@ function AcademicAdministrativeSubmissionsPanel({
   loading = false,
   academicYear,
   availableYears: cycleAvailableYears = [],
+  title = "IQAC Dashboard Overview",
+  subtitle = "Monitor forward items, approvals, submissions and auditor activities",
+  showActionCards = true,
 }) {
   const [users, setUsers] = useState([]);
   const [loadingUsers, setLoadingUsers] = useState(true);
@@ -3548,8 +3551,8 @@ function AcademicAdministrativeSubmissionsPanel({
       <section style={styles.panel}>
         <div style={styles.iqacOverviewHeader}>
           <div>
-            <h1 style={styles.iqacOverviewTitle}>IQAC Dashboard Overview</h1>
-            <p style={styles.iqacOverviewSubtitle}>Monitor forward items, approvals, submissions and auditor activities</p>
+            <h1 style={styles.iqacOverviewTitle}>{title}</h1>
+            <p style={styles.iqacOverviewSubtitle}>{subtitle}</p>
           </div>
         </div>
         <SkeletonList rows={5} />
@@ -3623,19 +3626,20 @@ function AcademicAdministrativeSubmissionsPanel({
     <section style={styles.panel}>
       <div style={styles.iqacOverviewHeader}>
         <div>
-          <h1 style={styles.iqacOverviewTitle}>IQAC Dashboard Overview</h1>
-          <p style={styles.iqacOverviewSubtitle}>Monitor forward items, approvals, submissions and auditor activities</p>
+          <h1 style={styles.iqacOverviewTitle}>{title}</h1>
+          <p style={styles.iqacOverviewSubtitle}>{subtitle}</p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           <label style={styles.yearFilter}>
             <span>Academic year</span>
             <select
-              className="audit-control"
               value={effectiveSelectedYear}
               onChange={(event) => setSelectedYear(event.target.value)}
               style={styles.yearSelect}
             >
-              {availableYears.map((year) => <option key={year} value={year}>{year}</option>)}
+              {availableYears.map((year) => (
+                <option key={year} value={year}>{academicYearOptionLabel(year, currentYear)}</option>
+              ))}
             </select>
           </label>
           <div style={styles.iqacDateCard}>
@@ -3653,26 +3657,28 @@ function AcademicAdministrativeSubmissionsPanel({
         </div>
       </div>
 
-      <div style={styles.submissionsOverviewGrid}>
-        <SubmissionStatCard
-          eyebrow="Forward"
-          title="Auditor Forward"
-          tone="forward"
-          pills={[
-            { label: "Pending Forwards to Internal auditor", value: forwardInternalCount, icon: "document" },
-            { label: "Pending Forwards to External auditor", value: forwardExternalCount, icon: "person" },
-          ]}
-        />
-        <SubmissionStatCard
-          eyebrow="Approve"
-          title="IQAC Review Approval"
-          tone="approve"
-          pills={[
-            { label: "Pending Approvals for Internal's review", value: approveInternalCount, icon: "shield" },
-            { label: "Pending Approvals for External's review", value: approveExternalCount, icon: "shield" },
-          ]}
-        />
-      </div>
+      {showActionCards && (
+        <div style={styles.submissionsOverviewGrid}>
+          <SubmissionStatCard
+            eyebrow="Forward"
+            title="Auditor Forward"
+            tone="forward"
+            pills={[
+              { label: "Pending Forwards to Internal auditor", value: forwardInternalCount, icon: "document" },
+              { label: "Pending Forwards to External auditor", value: forwardExternalCount, icon: "person" },
+            ]}
+          />
+          <SubmissionStatCard
+            eyebrow="Approve"
+            title="IQAC Review Approval"
+            tone="approve"
+            pills={[
+              { label: "Pending Approvals for Internal's review", value: approveInternalCount, icon: "shield" },
+              { label: "Pending Approvals for External's review", value: approveExternalCount, icon: "shield" },
+            ]}
+          />
+        </div>
+      )}
 
       <h2 style={styles.iqacSectionHeading}>
         Academic Submissions
@@ -3857,12 +3863,13 @@ function AuditReviewPanel({ auditType, submissions, activeGroup, onGroupChange, 
           <label style={styles.yearFilter}>
             <span>Academic year</span>
             <select
-              className="audit-control"
               value={effectiveSelectedYear}
               onChange={(event) => setSelectedYear(event.target.value)}
               style={styles.yearSelect}
             >
-              {availableYears.map((year) => <option key={year} value={year}>{year}</option>)}
+              {availableYears.map((year) => (
+                <option key={year} value={year}>{academicYearOptionLabel(year, currentYear)}</option>
+              ))}
             </select>
           </label>
           <span style={styles.schoolCount}>
@@ -3973,6 +3980,7 @@ function PreviousReportsPanel({
     ? "All Audit Reports"
     : `${titleCase(activeAuditType)} Audit Reports`;
   const showingHistoricalYear = selectedYear !== currentYear;
+  const reportHeading = showingHistoricalYear ? "Previous Reports" : "Current Reports";
 
   if (reportSubmission) {
     return (
@@ -3989,19 +3997,20 @@ function PreviousReportsPanel({
     <section style={styles.panel}>
       <div style={styles.previousReportsHeader}>
         <div style={styles.previousReportsHeading}>
-          <h2 style={styles.sectionTitle}>Previous Reports</h2>
+          <h2 style={styles.reportDashboardTitle}>{reportHeading}</h2>
           <p style={styles.previousReportsIntro}>Approved audit versions are preserved here as immutable historical records.</p>
         </div>
         <div style={styles.pageTitleActions}>
           <label style={styles.yearFilter}>
             <span>Academic year</span>
             <select
-              className="audit-control"
               value={selectedYear}
               onChange={(event) => setSelectedYear(event.target.value)}
               style={styles.yearSelect}
             >
-              {availableYears.map((year) => <option key={year} value={year}>{year}</option>)}
+              {availableYears.map((year) => (
+                <option key={year} value={year}>{academicYearOptionLabel(year, currentYear)}</option>
+              ))}
             </select>
           </label>
           <span style={styles.schoolCount}>{yearSubmissions.length} reports</span>
@@ -6408,6 +6417,7 @@ const styles = {
     justifyContent: "flex-end",
     flexWrap: "wrap",
     gap: 10,
+    paddingRight: 28,
   },
   previousReportsHeader: {
     display: "flex",
@@ -6433,22 +6443,24 @@ const styles = {
   yearFilter: {
     display: "flex",
     flexDirection: "column",
-    gap: 5,
+    gap: 7,
     color: "#475569",
-    fontSize: 10.5,
+    fontSize: 13,
     fontWeight: 750,
   },
   yearSelect: {
-    minWidth: 132,
-    height: 36,
+    minWidth: 190,
+    height: 44,
     border: "1px solid #cbd5e1",
-    borderRadius: 7,
-    padding: "6px 30px 6px 10px",
-    color: "#0f172a",
+    borderRadius: 8,
+    padding: "8px 30px 8px 14px",
+    color: "#0b1f44",
     background: "#fff",
     fontFamily: "inherit",
-    fontSize: 12,
-    fontWeight: 700,
+    fontSize: 16,
+    fontWeight: 850,
+    boxShadow: "0 6px 16px rgba(15, 23, 42, .06)",
+    outline: "none",
   },
   sectionTitle: {
     margin: 0,
@@ -6456,6 +6468,14 @@ const styles = {
     fontSize: 17,
     fontWeight: 700,
     lineHeight: 1.3,
+  },
+  reportDashboardTitle: {
+    margin: 0,
+    color: "#0f172a",
+    fontSize: 32,
+    fontWeight: 900,
+    lineHeight: 1.12,
+    letterSpacing: 0,
   },
   schoolCount: {
     flexShrink: 0,

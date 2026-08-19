@@ -36,6 +36,9 @@ export default function AppSidebar({
   onOpenProfile,
 }) {
   const activeItem = items.find((item) => item.id === activeId);
+  const hasItems = items.length > 0;
+  const hasSingleItem = items.length === 1;
+  const singleItem = hasSingleItem ? items[0] : null;
   const hasYearSelector = Boolean(onYearChange && availableYears?.length);
   const isCurrentAcademicYear = (year) => currentAcademicYear && String(year) === String(currentAcademicYear);
   const actionGroups = standaloneItems.reduce((groups, item) => {
@@ -133,16 +136,39 @@ export default function AppSidebar({
       </div>
 
       <nav className="app-sidebar__nav" aria-label="Appraisal sections" ref={dropdownRef}>
-        <button
-          type="button"
-          className="app-sidebar__nav-label"
-          onClick={() => setIsOpen((open) => !open)}
-          aria-expanded={isOpen}
-          aria-controls="appraisal-section-menu"
-        >
-          <span>Appraisal form</span>
-        </button>
-        <div className={`app-sidebar__dropdown${isOpen ? " is-open" : ""}`}>
+        {hasSingleItem ? (
+          <>
+            <div className="app-sidebar__nav-label">
+              <span>Appraisal form</span>
+            </div>
+            <button
+              type="button"
+              className={`app-sidebar__nav-item app-sidebar__pinned-item${singleItem.id === activeId ? " is-active" : ""}`}
+              onClick={() => selectSection(singleItem.id)}
+              aria-current={singleItem.id === activeId ? "page" : undefined}
+            >
+              <span className="app-sidebar__nav-icon">
+                {singleItem.id === "overview" || singleItem.id === "summary" ? <SummaryIcon /> : <ClipboardIcon />}
+              </span>
+              <span className="app-sidebar__nav-text">
+                <small>{singleItem.number ? `Section ${singleItem.number}` : singleItem.title}</small>
+                <strong>{singleItem.title}</strong>
+              </span>
+              {singleItem.id === activeId && <span className="app-sidebar__active-dot" />}
+            </button>
+          </>
+        ) : hasItems ? (
+          <>
+            <button
+              type="button"
+              className="app-sidebar__nav-label"
+              onClick={() => setIsOpen((open) => !open)}
+              aria-expanded={isOpen}
+              aria-controls="appraisal-section-menu"
+            >
+              <span>Appraisal form</span>
+            </button>
+            <div className={`app-sidebar__dropdown${isOpen ? " is-open" : ""}`}>
           <button
             type="button"
             className={`app-sidebar__select-card${activeItem ? "" : " is-placeholder"}`}
@@ -185,6 +211,8 @@ export default function AppSidebar({
             </div>
           )}
         </div>
+          </>
+        ) : null}
         {pinnedItems.length > 0 && (
           <div className="app-sidebar__pinned-list" aria-label="Pinned appraisal sections">
             {pinnedItems.map((item) => {
@@ -208,7 +236,7 @@ export default function AppSidebar({
             })}
           </div>
         )}
-        <span className="app-sidebar__nav-hint">Jump to any section at any time</span>
+        {items.length > 1 && <span className="app-sidebar__nav-hint">Jump to any section at any time</span>}
 
         {actionGroups.length > 0 && (
           <div className="app-sidebar__action-groups">
