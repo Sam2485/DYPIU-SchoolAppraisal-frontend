@@ -41,148 +41,47 @@ import {
   getStoredAcademicAuditorSchools,
   normalizeAcademicSchoolCodes,
 } from "../userManagement/userManagementConfig";
+import AcademicYearSelect from "./AcademicYearSelect";
 import BackupRestorePanel from "./BackupRestorePanel";
+import {
+  ADMIN_SUBMISSION_STATUS_FIELD,
+  AUDITOR_ASSIGNMENT_STATUS_FIELD,
+  AUDITOR_FINAL_REVIEW_NAV_ITEM,
+  BACKUP_RESTORE_NAV_ITEM,
+  PREVIOUS_REPORTS_NAV_ITEM,
+  REPORT_ARCHIVE_FIELD,
+  REVIEW_NAV_ITEMS,
+  REVIEW_ROLE_CONFIG,
+  SCHOOL_GROUPS,
+  START_NEXT_YEAR_NAV_ITEM,
+  USER_MANAGEMENT_NAV_ITEM,
+  auditLabels,
+  groupTabs,
+  routeViewFor,
+  statusLabels,
+  statusStyles,
+} from "./reviewDashboardConstants";
+import PreviousReportsHeader from "./PreviousReportsHeader";
+import {
+  academicYearOptionLabel,
+  academicYearPeriod,
+  buildMetrics,
+  compactAcademicYear,
+  nextAcademicYearFor,
+  normalizeAcademicYear,
+  titleCase,
+} from "./reviewDashboardUtils";
 import { formatDateDDMMYYYY } from "../../../utils/dateFormat";
 import { getAttachmentUrl } from "../../../utils/attachment";
 import { scrollPageToTop } from "../../../utils/scrollToTop";
 
-const REVIEW_NAV_ITEMS = [
-  { id: "overview", title: "Overview" },
-  { id: "advanced-overview", title: "Advanced Overview" },
-  { id: "academic", title: "Academic Audit" },
-  { id: "administrative", title: "Administrative Audit" },
-];
-const AUDITOR_FINAL_REVIEW_NAV_ITEM = {
-  id: "auditor-final-review",
-  title: "Auditor Final Review",
-  caption: "Completed auditor forms",
-  group: "final-verification",
-  groupLabel: "Final Verification",
-};
-const PREVIOUS_REPORTS_NAV_ITEM = {
-  id: "previous-reports",
-  title: "Reports",
-  group: "final-verification",
-  groupLabel: "Final Verification",
-};
-const USER_MANAGEMENT_NAV_ITEM = { id: "user-management", title: "User Management" };
-const REPORT_ARCHIVE_FIELD = "__reportArchive";
-const ADMIN_SUBMISSION_STATUS_FIELD = "__administrativeSubmissionStatus";
-const AUDITOR_ASSIGNMENT_STATUS_FIELD = "__auditorAssignmentStatus";
-const START_NEXT_YEAR_NAV_ITEM = {
-  id: "start-next-academic-year",
-  title: "Start Next Academic Year",
-  caption: "Create blank yearly forms",
-  group: "audit-cycle",
-  groupLabel: "Audit Cycle",
-};
-const BACKUP_RESTORE_NAV_ITEM = {
-  id: "backup-restore",
-  title: "Backup & Restore",
-  caption: "Database & Uploads backup",
-  group: "system-admin",
-  groupLabel: "System Administration",
-};
-const REVIEW_ROUTE_VIEW_IDS = new Set([
-  ...REVIEW_NAV_ITEMS.map((item) => item.id),
-  AUDITOR_FINAL_REVIEW_NAV_ITEM.id,
-  PREVIOUS_REPORTS_NAV_ITEM.id,
-  USER_MANAGEMENT_NAV_ITEM.id,
-  BACKUP_RESTORE_NAV_ITEM.id,
-]);
-
-const routeViewFor = (value, fallback) => {
-  const normalized = String(value || "").trim();
-  return REVIEW_ROUTE_VIEW_IDS.has(normalized) ? normalized : fallback;
-};
-
-const REVIEW_ROLE_CONFIG = {
-  "vice-chancellor": {
-    badge: "VC",
-    title: "Vice Chancellor Dashboard",
-    roleTitle: "Vice Chancellor",
-    roleText: "School Appraisal Review",
-  },
-  iqac: {
-    badge: "IQ",
-    title: "IQAC Dashboard",
-    roleTitle: "IQAC",
-    roleText: "School Appraisal Review",
-  },
-  auditor: {
-    badge: "AU",
-    title: "Auditor Dashboard",
-    roleTitle: "Auditor",
-    roleText: "Assigned Audit Remarks",
-  },
-};
-
-const SCHOOL_GROUPS = {
-  engineering: "Engineering",
-  nonEngineering: "Non-Engineering",
-  all: "All Schools",
-};
-
-const statusLabels = {
-  submitted: "Submitted",
-  "under-review": "Under Review",
-  "auditor-completed": "Auditor Completed",
-  "external_auditor_completed": "Auditor Completed",
-  "external-auditor-completed": "Auditor Completed",
-  approved: "Approved",
-};
-
-const statusStyles = {
-  submitted: { color: "#1d4ed8", background: "#dbeafe", border: "#bfdbfe" },
-  "under-review": { color: "#92400e", background: "#fef3c7", border: "#fde68a" },
-  "auditor-completed": { color: "#0f766e", background: "#ccfbf1", border: "#99f6e4" },
-  "external_auditor_completed": { color: "#0f766e", background: "#ccfbf1", border: "#99f6e4" },
-  "external-auditor-completed": { color: "#0f766e", background: "#ccfbf1", border: "#99f6e4" },
-  approved: { color: "#166534", background: "#dcfce7", border: "#bbf7d0" },
-};
-
-const auditLabels = {
-  academic: "Academic Audit",
-  administrative: "Administrative Audit",
-};
-
-const groupTabs = [
-  { id: "all", label: "All Schools" },
-  { id: "engineering", label: "Engineering" },
-  { id: "nonEngineering", label: "Non-Engineering" },
-];
-
 const initialsFor = (name = "") => name.split(" ").filter(Boolean).map((word) => word[0]).join("").slice(0, 2).toUpperCase();
-const titleCase = (value = "") => String(value).replaceAll("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
-const normalizeAcademicYear = (value = "2025-2026") => {
-  const match = String(value).match(/(\d{4})\D+(\d{2,4})/);
-  if (!match) return "2025-2026";
-  const startYear = Number(match[1]);
-  const endYear = match[2].length === 2
-    ? Number(`${String(startYear).slice(0, 2)}${match[2]}`)
-    : Number(match[2]);
-  return `${startYear}-${endYear}`;
-};
-const nextAcademicYearFor = (value) => {
-  const [startYear, endYear] = normalizeAcademicYear(value).split("-").map(Number);
-  return `${startYear + 1}-${endYear + 1}`;
-};
 const reportVersionForCategory = (category = "", fallbackVersion = 1) => {
   const normalized = normalizeUserRole(category);
   if (normalized === "internal") return 1;
   if (normalized === "external") return 2;
   return Number(fallbackVersion || 1);
 };
-const compactAcademicYear = (value) => {
-  const [startYear, endYear] = normalizeAcademicYear(value).split("-");
-  return `${startYear}-${endYear.slice(-2)}`;
-};
-const academicYearPeriod = (value) => {
-  const [startYear, endYear] = normalizeAcademicYear(value).split("-");
-  return `July, ${startYear} - June, ${endYear}`;
-};
-const academicYearOptionLabel = (year, activeYear) =>
-  compactAcademicYear(year) === compactAcademicYear(activeYear) ? `${year} (active)` : year;
 const hasAuditorAssignment = (submission = {}) => Boolean(
   submission.forwardedAt ||
   submission.forwardedToAuditorId ||
@@ -2682,18 +2581,6 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
   );
 }
 
-function buildMetrics(submissions) {
-  return submissions.reduce(
-    (metrics, submission) => {
-      metrics.total += 1;
-      if (metrics[submission.status] != null) metrics[submission.status] += 1;
-      if (metrics[submission.auditType] != null) metrics[submission.auditType] += 1;
-      return metrics;
-    },
-    { total: 0, submitted: 0, "under-review": 0, "auditor-completed": 0, approved: 0, academic: 0, administrative: 0 }
-  );
-}
-
 function OverviewPanel({ metrics, submissions, loading, onOpen }) {
   const pendingSubmissions = submissions.filter((submission) => submission.status !== "approved");
   const approvalRate = metrics.total ? Math.round((metrics.approved / metrics.total) * 100) : 0;
@@ -3630,18 +3517,14 @@ function AcademicAdministrativeSubmissionsPanel({
           <p style={styles.iqacOverviewSubtitle}>{subtitle}</p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          <label style={styles.yearFilter}>
-            <span>Academic year</span>
-            <select
-              value={effectiveSelectedYear}
-              onChange={(event) => setSelectedYear(event.target.value)}
-              style={styles.yearSelect}
-            >
-              {availableYears.map((year) => (
-                <option key={year} value={year}>{academicYearOptionLabel(year, currentYear)}</option>
-              ))}
-            </select>
-          </label>
+          <AcademicYearSelect
+            value={effectiveSelectedYear}
+            years={availableYears}
+            onChange={setSelectedYear}
+            activeYear={currentYear}
+            optionLabel={academicYearOptionLabel}
+            styles={styles}
+          />
           <div style={styles.iqacDateCard}>
             <span style={styles.iqacDateIconWrap} aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" style={{ width: 18, height: 18 }}>
@@ -3860,18 +3743,14 @@ function AuditReviewPanel({ auditType, submissions, activeGroup, onGroupChange, 
           <h2 style={styles.sectionTitle}>{auditLabels[auditType]} Reviews</h2>
         </div>
         <div style={styles.pageTitleActions}>
-          <label style={styles.yearFilter}>
-            <span>Academic year</span>
-            <select
-              value={effectiveSelectedYear}
-              onChange={(event) => setSelectedYear(event.target.value)}
-              style={styles.yearSelect}
-            >
-              {availableYears.map((year) => (
-                <option key={year} value={year}>{academicYearOptionLabel(year, currentYear)}</option>
-              ))}
-            </select>
-          </label>
+          <AcademicYearSelect
+            value={effectiveSelectedYear}
+            years={availableYears}
+            onChange={setSelectedYear}
+            activeYear={currentYear}
+            optionLabel={academicYearOptionLabel}
+            styles={styles}
+          />
           <span style={styles.schoolCount}>
             {auditType === "administrative"
               ? `${filtered.length} ${filtered.length === 1 ? "submission" : "submissions"}`
@@ -3970,15 +3849,25 @@ function PreviousReportsPanel({
     { id: "academic", label: "Academic" },
     { id: "administrative", label: "Administrative" },
   ];
-  const yearSubmissions = submissions.filter(
-    (submission) => compactAcademicYear(submission.auditCycle || currentYear) === selectedYear
+  const yearSubmissions = useMemo(
+    () => submissions.filter((submission) => compactAcademicYear(submission.auditCycle || currentYear) === selectedYear),
+    [currentYear, selectedYear, submissions],
   );
-  const filteredSubmissions = activeAuditType === "all"
-    ? yearSubmissions
-    : yearSubmissions.filter((submission) => submission.auditType === activeAuditType);
-  const sectionTitle = activeAuditType === "all"
-    ? "All Audit Reports"
-    : `${titleCase(activeAuditType)} Audit Reports`;
+  const filteredSubmissions = useMemo(
+    () => activeAuditType === "all"
+      ? yearSubmissions
+      : yearSubmissions.filter((submission) => submission.auditType === activeAuditType),
+    [activeAuditType, yearSubmissions],
+  );
+  const sectionTitle = useMemo(
+    () => activeAuditType === "all" ? "All Audit Reports" : `${titleCase(activeAuditType)} Audit Reports`,
+    [activeAuditType],
+  );
+  const auditTypeCounts = useMemo(() => ({
+    all: yearSubmissions.length,
+    academic: yearSubmissions.filter((submission) => submission.auditType === "academic").length,
+    administrative: yearSubmissions.filter((submission) => submission.auditType === "administrative").length,
+  }), [yearSubmissions]);
   const showingHistoricalYear = selectedYear !== currentYear;
   const reportHeading = showingHistoricalYear ? "Previous Reports" : "Current Reports";
 
@@ -3995,27 +3884,16 @@ function PreviousReportsPanel({
 
   return (
     <section style={styles.panel}>
-      <div style={styles.previousReportsHeader}>
-        <div style={styles.previousReportsHeading}>
-          <h2 style={styles.reportDashboardTitle}>{reportHeading}</h2>
-          <p style={styles.previousReportsIntro}>Approved audit versions are preserved here as immutable historical records.</p>
-        </div>
-        <div style={styles.pageTitleActions}>
-          <label style={styles.yearFilter}>
-            <span>Academic year</span>
-            <select
-              value={selectedYear}
-              onChange={(event) => setSelectedYear(event.target.value)}
-              style={styles.yearSelect}
-            >
-              {availableYears.map((year) => (
-                <option key={year} value={year}>{academicYearOptionLabel(year, currentYear)}</option>
-              ))}
-            </select>
-          </label>
-          <span style={styles.schoolCount}>{yearSubmissions.length} reports</span>
-        </div>
-      </div>
+      <PreviousReportsHeader
+        title={reportHeading}
+        selectedYear={selectedYear}
+        years={availableYears}
+        currentYear={currentYear}
+        reportCount={yearSubmissions.length}
+        onYearChange={setSelectedYear}
+        optionLabel={academicYearOptionLabel}
+        styles={styles}
+      />
 
       {loading && <SkeletonList rows={3} />}
       {!loading && !yearSubmissions.length && (
@@ -4026,9 +3904,7 @@ function PreviousReportsPanel({
         <div style={styles.previousReportGroups}>
           <div style={styles.tabs} role="tablist" aria-label="Previous report types">
             {auditTypeTabs.map((tab) => {
-              const count = tab.id === "all"
-                ? yearSubmissions.length
-                : yearSubmissions.filter((submission) => submission.auditType === tab.id).length;
+              const count = auditTypeCounts[tab.id] || 0;
               return (
                 <button
                   key={tab.id}
@@ -4081,7 +3957,14 @@ function PreviousReportAuditSection({
     { id: "internal", label: "Internal Audit" },
     { id: "external", label: "External Audit" },
   ];
-  const filteredReports = reports.filter((submission) => submission.reportCategory === activeCategory);
+  const filteredReports = useMemo(
+    () => reports.filter((submission) => submission.reportCategory === activeCategory),
+    [activeCategory, reports],
+  );
+  const categoryCounts = useMemo(() => ({
+    internal: reports.filter((submission) => submission.reportCategory === "internal").length,
+    external: reports.filter((submission) => submission.reportCategory === "external").length,
+  }), [reports]);
 
   return (
     <section style={styles.previousReportGroup}>
@@ -4092,7 +3975,7 @@ function PreviousReportAuditSection({
 
       <div style={styles.tabs} role="tablist" aria-label={`${title} categories`}>
         {categoryTabs.map((tab) => {
-          const count = reports.filter((submission) => submission.reportCategory === tab.id).length;
+          const count = categoryCounts[tab.id] || 0;
           return (
             <button
               key={tab.id}
